@@ -39,6 +39,22 @@ div.navbar-header {
 div.chart-title {
   font-size: 28pt;
 }
+
+/* Center the page-loaded date in the navbar */
+.navbar-author {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  color: rgba(255,255,255,0.8);
+  line-height: 50px;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+/* Hide the About page tab from the left-side tab navigation only */
+.navbar-nav li:has(a[data-toggle="tab"][href="#about"]) {
+  display: none !important;
+}
 </style>
 
 
