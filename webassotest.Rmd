@@ -1,7 +1,7 @@
 ---
 title: "WEB - Assotest"
 date: 'Page loaded: `r format(as.POSIXct(format(Sys.time())), "%b %d, %Y")`'
-output: 
+output:
   flexdashboard::flex_dashboard:
     navbar:
       - { title: "About", href: "#about", align: right, icon: glyphicon-info-sign}
@@ -10,10 +10,10 @@ output:
     social: menu
     theme:
       version: 4
-      base_font: 
+      base_font:
         google: Prompt
       heading_font:
-        google: Sen      
+        google: Sen
 runtime: shiny
 ---
 
@@ -58,37 +58,50 @@ div.chart-title {
 </style>
 
 
+
 ```{r setup, include=FALSE}
 library("flexdashboard")
 library("tidyverse")
 library("rhandsontable")
 library("shinyscreenshot")
 
-# Default data matrix
-Cases    <- c(10L, 20L, 30L)
-Controls <- c(10L, 20L, 30L)
+# Default data matrix — rows = Cases/Controls, cols = WT/Het/Hom
+df <- data.frame(
+  WT  = c(10L, 10L),
+  Het = c(20L, 20L),
+  Hom = c(30L, 30L)
+)
+rownames(df) <- c("Cases", "Controls")
 
-df <- data.frame(Cases, Controls)
-rownames(df) <- c("WT", "Het", "Hom")
-
-# Defined in setup so it is available to both sidebar and main column chunks
+# Reads the edited table
 modified_table <- reactive({
   round(hot_to_r(req(input$dftbl1)))
+})
+
+# Extracts ca/co vectors from the transposed table
+ca_co <- reactive({
+  tbl <- modified_table()
+  list(
+    ca = as.integer(tbl["Cases", ]),
+    co = as.integer(tbl["Controls", ])
+  )
+})
+
+# Live HWE computation
+hwe_reactive <- reactive({
+  d <- ca_co()
+  hwe_pvalues(d$ca, d$co, method = input$hwe_method)
 })
 ```
 
 
 Data analysis
-===================================== 
+=====================================
 
-Sidebar {.sidebar}
+Row {data-height=180}
 -------------------------------------
 
-### Input
-
-**Enter your genotype counts below.**
-
-Non-integer values will be rounded. Rows correspond to genotypes (WT = wild-type homozygote, Het = heterozygote, Hom = variant homozygote).
+### Data input
 
 ```{r}
 global <- reactiveValues(df = df)
@@ -98,20 +111,55 @@ rHandsontableOutput("dftbl1")
 output$dftbl1 <- renderRHandsontable({
   rhandsontable(global$df, selectCallback = TRUE, readOnly = FALSE) %>%
     hot_context_menu(allowRowEdit = FALSE, allowColEdit = FALSE) %>%
-    hot_validate_numeric(col = c("Cases", "Controls"), min = 0, allowInvalid = FALSE)
+    hot_validate_numeric(col = c("WT", "Het", "Hom"), min = 0, allowInvalid = FALSE)
 })
 ```
 
-### HWE test method
+### HWE test
 
 ```{r}
 radioButtons("hwe_method",
              label = "Hardy-Weinberg test method",
              choices = c("Chi-square" = "chisq", "Exact (Wigginton 2005)" = "exact"),
              selected = "chisq")
+
 ```
 
-### Save your work {data-height=150}
+### HWE results
+
+```{r}
+uiOutput("hwe_table")
+
+output$hwe_table <- renderUI({
+  d     <- ca_co()
+  check <- check_data_validity(d$ca, d$co)
+  if (!check$valid) return(p(check$msg))
+  hwe          <- hwe_reactive()
+  method_label <- if (input$hwe_method == "exact") "Exact H-W test" else "Chi-sq H-W test"
+  stat_header  <- if (input$hwe_method == "exact") "\u2014" else "\u03c7\u00b2"
+  rows <- list(
+    c("Cases",
+      if (is.na(hwe$t.ca)) "\u2014" else formatC(hwe$t.ca, format = "f", digits = 3),
+      formatC(hwe$p.ca, format = "f", digits = 3)),
+    c("Controls",
+      if (is.na(hwe$t.co)) "\u2014" else formatC(hwe$t.co, format = "f", digits = 3),
+      formatC(hwe$p.co, format = "f", digits = 3)),
+    c("Both",
+      formatC(hwe$t.2, format = "f", digits = 3),
+      formatC(hwe$p.2, format = "f", digits = 3))
+  )
+  tagList(
+    tags$b(method_label),
+    tags$table(
+      class = "table table-sm table-bordered",
+      tags$thead(tags$tr(tags$th("Group"), tags$th(stat_header), tags$th("p"))),
+      tags$tbody(lapply(rows, function(r) tags$tr(lapply(r, tags$td))))
+    )
+  )
+})
+```
+
+### Save your work
 
 ```{r}
 screenshotButton(selector = "body",
@@ -124,13 +172,13 @@ downloadButton("download_results", "  Download results (.csv)")
 output$download_results <- downloadHandler(
   filename = function() paste0("webassotest_results_", Sys.Date(), ".csv"),
   content  = function(file) {
-    tbl   <- modified_table()
-    ca    <- tbl$Cases
-    co    <- tbl$Controls
+    d     <- ca_co()
+    ca    <- d$ca
+    co    <- d$co
     check <- check_data_validity(ca, co)
     req(check$valid)
     hwe <- hwe_pvalues(ca, co, method = input$hwe_method)
-    res <- gtm(ca, co, hwe_method = input$hwe_method)
+    res <- gtm(ca, co)
     hwe_df <- data.frame(
       Group    = c("Cases", "Controls", "Both"),
       HWE_stat = c(hwe$t.ca, hwe$t.co, hwe$t.2),
@@ -147,8 +195,8 @@ output$download_results <- downloadHandler(
 ```
 
 
-Column {data-width=800}
------------------------------------------------------------------------
+Row
+-------------------------------------
 
 ### Result
 
@@ -279,8 +327,7 @@ ci.mat <- function(alpha = 0.05) {
 gtm <- function(ca, co,
                 flev = c("WT", "Het", "Hom"),
                 fnam = " ",
-                main = fnam,
-                hwe_method = "chisq") {
+                main = fnam) {
 
   rlev <- c(rep(paste(flev[1:2], collapse = "/"), 2), flev[3])
   dlev <- c(flev[1], rep(paste(flev[2:3], collapse = "/"), 2))
@@ -370,26 +417,6 @@ gtm <- function(ca, co,
     ft <- fisher.test(rct)
     OR.r[1, ] <- c(ft[["estimate"]], ft[["conf.int"]])
   }
-
-  # HWE tests — lower left corner
-  hwe <- hwe_pvalues(ca, co, method = hwe_method)
-  method_label <- if (hwe_method == "exact") "Exact H-W test" else "Chi-sq H-W test"
-
-  xr <- cumsum(c(max(strwidth(c("Cases", "Controls", "Both"))),
-                 max(strwidth("0.000"), strwidth("Stat")),
-                 max(strwidth("0.000"), strwidth("p"))) * 1.5) - 10
-  text(xr[3], 16, method_label, adj = c(1, 0.5))
-  text(xr, 12, c("", if (hwe_method == "exact") "—" else expression(chi^2),
-                 expression(p)), adj = c(0.9, 0.5))
-  text(xr, 8,  c("Cases",
-                  if (is.na(hwe$t.ca)) "—" else formatC(hwe$t.ca, format = "f", digits = 3),
-                  formatC(hwe$p.ca, format = "f", digits = 3)), adj = c(1, 0.5))
-  text(xr, 5,  c("Controls",
-                  if (is.na(hwe$t.co)) "—" else formatC(hwe$t.co, format = "f", digits = 3),
-                  formatC(hwe$p.co, format = "f", digits = 3)), adj = c(1, 0.5))
-  text(xr, 2,  c("Both",
-                  formatC(hwe$t.2, format = "f", digits = 3),
-                  formatC(hwe$p.2, format = "f", digits = 3)), adj = c(1, 0.5))
 
   # Genotype model — top centre
   text(50, 98, "Genotype model", font = 2)
@@ -482,12 +509,12 @@ gtm <- function(ca, co,
 # Plot
 # --------------------------------------------------------------------
 renderPlot({
-  tbl   <- modified_table()
-  ca    <- tbl$Cases
-  co    <- tbl$Controls
+  d     <- ca_co()
+  ca    <- d$ca
+  co    <- d$co
   check <- check_data_validity(ca, co)
   validate(need(check$valid, check$msg))
-  gtm(ca, co, hwe_method = input$hwe_method)
+  gtm(ca, co)
 })
 ```
 
