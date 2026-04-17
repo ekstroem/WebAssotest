@@ -55,17 +55,21 @@ div.chart-title {
 .navbar-nav li:has(a[data-toggle="tab"][href="#about"]) {
   display: none !important;
 }
+
+/* Left-align rhandsontable row header labels */
+.handsontable tbody th {
+  text-align: left !important;
+}
 </style>
 
 
 
 ```{r setup, include=FALSE}
 library("flexdashboard")
-library("tidyverse")
 library("rhandsontable")
 library("shinyscreenshot")
 
-# Default data matrix — rows = Cases/Controls, cols = WT/Het/Hom
+# Default genotype count table — rows: Cases/Controls, cols: WT/Het/Hom
 df <- data.frame(
   WT  = c(10L, 10L),
   Het = c(20L, 20L),
@@ -73,12 +77,356 @@ df <- data.frame(
 )
 rownames(df) <- c("Cases", "Controls")
 
-# Reads the edited table
+
+# --------------------------------------------------------------------
+# SNPHWE(obs_hets, obs_hom1, obs_hom2)
+# Exact test of Hardy-Weinberg Equilibrium.
+# Reference: Wigginton JE, Cutler DJ, Abecasis GR (2005). A Note on
+# Exact Tests of Hardy-Weinberg Equilibrium. Am J Hum Genet 76:887-893.
+#
+# obs_hom1, obs_hom2: homozygote counts (order does not matter;
+#   the algorithm identifies the rare homozygote internally via min/max).
+# obs_hets: heterozygote count.
+# Returns the two-sided p-value, or -1.0 on invalid (negative) input.
+#
+# Algorithm: enumerates the conditional distribution of heterozygote
+# counts given fixed marginals, computing probabilities by recurrence
+# outward from the mode to avoid overflow.
+# --------------------------------------------------------------------
+SNPHWE <- function(obs_hets, obs_hom1, obs_hom2) {
+  if (obs_hom1 < 0 || obs_hom2 < 0 || obs_hets < 0)
+    return(-1.0)
+
+  N       <- obs_hom1 + obs_hom2 + obs_hets
+  obs_homr <- min(obs_hom1, obs_hom2)
+  obs_homc <- max(obs_hom1, obs_hom2)
+  rare    <- obs_homr * 2 + obs_hets
+
+  probs <- rep(0, 1 + rare)
+
+  mid <- floor(rare * (2 * N - rare) / (2 * N))
+  if ((mid %% 2) != (rare %% 2)) mid <- mid + 1
+
+  probs[mid + 1] <- 1.0
+  mysum <- 1.0
+
+  # Probabilities from midpoint downward
+  curr_hets <- mid
+  curr_homr <- (rare - mid) / 2
+  curr_homc <- N - curr_hets - curr_homr
+
+  while (curr_hets >= 2) {
+    probs[curr_hets - 1] <- probs[curr_hets + 1] * curr_hets *
+      (curr_hets - 1.0) / (4.0 * (curr_homr + 1.0) * (curr_homc + 1.0))
+    mysum     <- mysum + probs[curr_hets - 1]
+    curr_hets <- curr_hets - 2
+    curr_homr <- curr_homr + 1
+    curr_homc <- curr_homc + 1
+  }
+
+  # Probabilities from midpoint upward
+  curr_hets <- mid
+  curr_homr <- (rare - mid) / 2
+  curr_homc <- N - curr_hets - curr_homr
+
+  while (curr_hets <= rare - 2) {
+    probs[curr_hets + 3] <- probs[curr_hets + 1] * 4.0 * curr_homr *
+      curr_homc / ((curr_hets + 2.0) * (curr_hets + 1.0))
+    mysum     <- mysum + probs[curr_hets + 3]
+    curr_hets <- curr_hets + 2
+    curr_homr <- curr_homr - 1
+    curr_homc <- curr_homc - 1
+  }
+
+  target <- probs[obs_hets + 1]
+  p <- min(1.0, sum(probs[probs <= target]) / mysum)
+  return(p)
+}
+
+
+# --------------------------------------------------------------------
+# check_data_validity(ca, co)
+# ca, co: integer vectors of length 3 (WT, Het, Hom counts).
+# Returns list(valid = TRUE/FALSE, msg = character).
+# Rejects tables where all cases or all controls are zero, or where
+# fewer than 2 genotype groups have any observations (models cannot
+# be identified with only one non-empty column).
+# --------------------------------------------------------------------
+check_data_validity <- function(ca, co) {
+  if (sum(ca + co == 0) > 1) return(list(valid = FALSE,
+    msg = "At least two genotype groups must have observations."))
+  if (sum(ca) == 0) return(list(valid = FALSE,
+    msg = "There are no cases. Please enter case counts."))
+  if (sum(co) == 0) return(list(valid = FALSE,
+    msg = "There are no controls. Please enter control counts."))
+  return(list(valid = TRUE, msg = ""))
+}
+
+
+# --------------------------------------------------------------------
+# hwe_pvalues(ca, co, method)
+# ca, co: integer vectors of length 3. method: "chisq" or "exact".
+# Returns a list with test statistics (t.ca, t.co, t.2) and p-values
+# (p.ca, p.co, p.2) for cases, controls, and both combined.
+#
+# For method = "exact": individual statistics are NA (SNPHWE returns
+# only a p-value); the combined p-value uses Fisher's method —
+# -2*(log(p.ca) + log(p.co)) ~ chi-sq(4).
+# For method = "chisq": combined statistic is the sum of the two
+# chi-square values ~ chi-sq(2).
+# --------------------------------------------------------------------
+hwe_pvalues <- function(ca, co, method = "chisq") {
+
+  # Chi-square HWE test for a single group x = c(WT, Het, Hom)
+  hwe_chisq <- function(x) {
+    f   <- (2 * x[1] + x[2]) / (2 * sum(x))   # reference allele frequency
+    e   <- c(f^2, 2 * f * (1 - f), (1 - f)^2) * sum(x)
+    tst <- sum((x - e)^2 / e)
+    p   <- 1 - pchisq(tst, 1)
+    list(stat = tst, p = p)
+  }
+
+  if (method == "exact") {
+    p.ca  <- SNPHWE(ca[2], ca[1], ca[3])
+    p.co  <- SNPHWE(co[2], co[1], co[3])
+    # Combined: sum of -2*log(p) ~ chi-sq(4) (Fisher's method)
+    t.2   <- -2 * (log(p.ca) + log(p.co))
+    p.2   <- 1 - pchisq(t.2, 4)
+    t.ca  <- NA
+    t.co  <- NA
+  } else {
+    r.ca  <- hwe_chisq(ca)
+    r.co  <- hwe_chisq(co)
+    t.ca  <- r.ca$stat;  p.ca <- r.ca$p
+    t.co  <- r.co$stat;  p.co <- r.co$p
+    t.2   <- t.ca + t.co
+    p.2   <- 1 - pchisq(t.2, 2)
+  }
+
+  list(t.ca = t.ca, p.ca = p.ca,
+       t.co = t.co, p.co = p.co,
+       t.2  = t.2,  p.2  = p.2)
+}
+
+
+# --------------------------------------------------------------------
+# ci.mat(alpha)
+# Returns a 2x3 matrix for simultaneous Wald CI computation.
+# Post-multiply a [estimate, se] matrix by ci.mat() to obtain
+# [estimate, lower, upper] in one step — e.g.:
+#   exp(summary(fit)$coef[, 1:2] %*% ci.mat())
+# gives the OR with 95% CIs directly from log-OR and its SE.
+# --------------------------------------------------------------------
+ci.mat <- function(alpha = 0.05) {
+  ciM <- rbind(c(1, 1, 1), qnorm(1 - alpha / 2) * c(0, -1, 1))
+  colnames(ciM) <- c("Estimate",
+    paste0(formatC(100 *    alpha / 2,  format = "f", digits = 1), "%"),
+    paste0(formatC(100 * (1 - alpha / 2), format = "f", digits = 1), "%"))
+  ciM
+}
+
+
+# --------------------------------------------------------------------
+# gtm(ca, co, flev, fnam, main)
+# ca, co: integer vectors of length 3 (WT, Het, Hom counts).
+# flev: genotype level labels. fnam/main: plot title.
+#
+# Fits five nested logistic regression models via glm(..., binomial):
+#   nul: intercept only (no association)
+#   gen: factor(WT/Het/Hom) — genotype model, 2 df
+#   dom: factor(WT vs Het+Hom) — dominant model, 1 df
+#   cod: linear score 1/2/3 — co-dominant/additive model, 1 df
+#   rec: factor(WT+Het vs Hom) — recessive model, 1 df
+#
+# Draws a model-comparison diagram using base graphics. Lines connect
+# nested models; lwd=8 when the simpler model cannot be rejected at
+# p >= 0.05 (compatible), lwd=2 otherwise (rejected).
+#
+# When any cell in a contrast is zero, Fisher's exact test replaces
+# the logistic-regression OR and CI for that contrast.
+#
+# Returns a summary data frame invisibly (used by the CSV download).
+# --------------------------------------------------------------------
+gtm <- function(ca, co,
+                flev = c("WT", "Het", "Hom"),
+                fnam = " ",
+                main = fnam) {
+
+  rlev <- c(rep(paste(flev[1:2], collapse = "/"), 2), flev[3])
+  dlev <- c(flev[1], rep(paste(flev[2:3], collapse = "/"), 2))
+  f.g  <- factor(flev)
+  f.d  <- factor(dlev, levels = unique(dlev))
+  v.c  <- 1:3
+  f.r  <- factor(rlev, levels = unique(rlev))
+
+  par(mar = c(0, 0, 2, 0), cex = 1.6)
+  plot(NA, type = "n", axes = FALSE, xlab = "", ylab = "",
+       xlim = c(-10, 100), ylim = c(0, 100), main = main)
+
+  # Guard: warn if data are marginal but still plottable
+  if (sum(c(ca, co) == 0) > 3)
+    text(-10, 80, "Warning: many zero cells — interpret with caution.",
+         font = 2, adj = 0)
+
+  # Fit models
+  nul <- glm(cbind(ca, co) ~ 1,   family = binomial)
+  gen <- glm(cbind(ca, co) ~ f.g, family = binomial)
+  dom <- glm(cbind(ca, co) ~ f.d, family = binomial)
+  cod <- glm(cbind(ca, co) ~ v.c, family = binomial)
+  rec <- glm(cbind(ca, co) ~ f.r, family = binomial)
+
+  # Likelihood-ratio tests for all nested pairs
+  t.dn  <- anova(nul, dom, test = "Chisq")
+  t.cn  <- anova(nul, cod, test = "Chisq")
+  t.rn  <- anova(nul, rec, test = "Chisq")
+  t.gd  <- anova(dom, gen, test = "Chisq")
+  t.gc  <- anova(cod, gen, test = "Chisq")
+  t.gr  <- anova(rec, gen, test = "Chisq")
+  t.gn  <- anova(nul, gen, test = "Chisq")
+
+  extract <- function(a) list(chisq = abs(a[2, 4]), p = a[2, 5])
+  r.dn <- extract(t.dn); r.cn <- extract(t.cn); r.rn <- extract(t.rn)
+  r.gd <- extract(t.gd); r.gc <- extract(t.gc); r.gr <- extract(t.gr)
+  r.gn <- extract(t.gn)
+
+  # Odds ratio estimates (log-OR ± SE → OR with CI via ci.mat)
+  OR.g <- exp(summary(gen)$coef[-1, 1:2, drop = FALSE] %*% ci.mat())
+  OR.d <- exp(summary(dom)$coef[-1, 1:2, drop = FALSE] %*% ci.mat())
+  OR.c <- exp(summary(cod)$coef[-1, 1:2, drop = FALSE] %*% ci.mat())
+  OR.r <- exp(summary(rec)$coef[-1, 1:2, drop = FALSE] %*% ci.mat())
+
+  # Pad OR matrices in case of singularities (complete separation)
+  if (nrow(OR.g) < 2) OR.g <- rbind(OR.g, rep(NA, 3))
+  if (nrow(OR.d) == 0) OR.d <- matrix(NA, 1, 3)
+  if (nrow(OR.r) == 0) OR.r <- matrix(NA, 1, 3)
+
+  # Fall back to Fisher's exact test when zeros are present.
+  # Each block checks the 2x2 table for the relevant contrast;
+  # if any cell is zero the logistic OR/CI is replaced by Fisher's.
+  gt1 <- rbind(co, ca)[, -3]   # WT vs Het
+  gt2 <- rbind(co, ca)[, -2]   # WT vs Hom
+  if (any(gt1 == 0)) {
+    ft <- fisher.test(gt1)
+    OR.g[1, ] <- c(ft[["estimate"]], ft[["conf.int"]])
+  }
+  if (any(gt2 == 0)) {
+    ft <- fisher.test(gt2)
+    OR.g[2, ] <- c(ft[["estimate"]], ft[["conf.int"]])
+  }
+  dot <- rbind(co, ca) %*% cbind(c(1, 0, 0), c(0, 1, 1))  # WT vs Het+Hom
+  if (any(dot == 0)) {
+    ft <- fisher.test(dot)
+    OR.d[1, ] <- c(ft[["estimate"]], ft[["conf.int"]])
+  }
+  if (sum(wh <- (ca + co > 0)) < 3) {
+    cot <- rbind(co, ca)[, wh]
+    if (any(cot == 0)) {
+      ft <- fisher.test(cot)
+      OR.c[1, ] <- c(ft[["estimate"]], ft[["conf.int"]])
+      # When the Het column is missing, the additive OR is per 2 copies;
+      # take the square root to recover the per-allele OR.
+      if (!wh[2]) OR.c <- sqrt(OR.c)
+    }
+  }
+  rct <- rbind(co, ca) %*% cbind(c(1, 1, 0), c(0, 0, 1))  # WT+Het vs Hom
+  if (any(rct == 0)) {
+    ft <- fisher.test(rct)
+    OR.r[1, ] <- c(ft[["estimate"]], ft[["conf.int"]])
+  }
+
+  # Genotype model — top centre
+  text(50, 98, "Genotype model", font = 2)
+  text(50, 95, paste("OR(", flev[2], "vs.", flev[1], "):",
+                     formatC(OR.g[1, 1], format = "f", digits = 2),
+                     "(", formatC(OR.g[1, 2], format = "f", digits = 2),
+                     ";", formatC(OR.g[1, 3], format = "f", digits = 2), ")"))
+  text(50, 92, paste("OR(", flev[3], "vs.", flev[1], "):",
+                     formatC(OR.g[2, 1], format = "f", digits = 2),
+                     "(", formatC(OR.g[2, 2], format = "f", digits = 2),
+                     ";", formatC(OR.g[2, 3], format = "f", digits = 2), ")"))
+
+  # Dominant model — left
+  text(0, 53, "Dominant", adj = c(0, 0.5), font = 2)
+  text(0, 50, paste("OR(", dlev[2], "vs.", dlev[1], "):"), adj = c(0, 0.5))
+  text(0, 47, paste(formatC(OR.d[1, 1], format = "f", digits = 2),
+                    "(", formatC(OR.d[1, 2], format = "f", digits = 2),
+                    ";", formatC(OR.d[1, 3], format = "f", digits = 2), ")"),
+       adj = c(0, 0.5))
+
+  # Co-dominant model — centre
+  text(50, 53, "Co-dominant", adj = c(0.5, 0.5), font = 2)
+  text(50, 50, paste("OR(", flev[3], "vs.", flev[2], ")=",
+                     "OR(", flev[2], "vs.", flev[1], "):"), adj = c(0.5, 0.5))
+  text(50, 47, paste(formatC(OR.c[1, 1], format = "f", digits = 2),
+                     "(", formatC(OR.c[1, 2], format = "f", digits = 2),
+                     ";", formatC(OR.c[1, 3], format = "f", digits = 2), ")"),
+       adj = c(0.5, 0.5))
+
+  # Recessive model — right
+  text(100, 53, "Recessive", adj = c(1, 0.5), font = 2)
+  text(100, 50, paste("OR(", rlev[3], "vs.", rlev[1], "):"), adj = c(1, 0.5))
+  text(100, 47, paste(formatC(OR.r[1, 1], format = "f", digits = 2),
+                      "(", formatC(OR.r[1, 2], format = "f", digits = 2),
+                      ";", formatC(OR.r[1, 3], format = "f", digits = 2), ")"),
+       adj = c(1, 0.5))
+
+  # Null model — bottom centre
+  text(50, 8, "Null model", adj = c(0.5, 0.5), font = 2)
+  text(50, 5, "OR = 1", adj = c(0.5, 0.5))
+  text(50, 2, substitute(chi^2 * rest,
+    list(rest = paste("(2)=", formatC(r.gn$chisq, format = "f", digits = 3),
+                      ", p=", formatC(r.gn$p,     format = "f", digits = 3)))),
+    adj = c(0.5, 0.5))
+
+  # Connecting lines: lwd=8 when p >= 0.05 (simpler model not rejected),
+  # lwd=2 when rejected. Thick lines indicate compatible simplifications.
+  lwd_for <- function(p) if (!is.na(p) && p >= 0.05) 8 else 2
+
+  lines(c(40, 10), c(90, 55), lwd = lwd_for(r.gd$p))  # Genotype  -> Dominant
+  lines(c(10, 40), c(45, 10), lwd = lwd_for(r.dn$p))  # Dominant  -> Null
+  lines(c(50, 50), c(10, 45), lwd = lwd_for(r.cn$p))  # Null      -> Co-dominant
+  lines(c(50, 50), c(55, 90), lwd = lwd_for(r.gc$p))  # Co-dominant -> Genotype
+  lines(c(60, 90), c(90, 55), lwd = lwd_for(r.gr$p))  # Genotype  -> Recessive
+  lines(c(90, 60), c(45, 10), lwd = lwd_for(r.rn$p))  # Recessive -> Null
+
+  rect(0, 25, 100, 30, col = "white", border = "white")
+  rect(0, 70, 100, 75, col = "white", border = "white")
+
+  # Test statistics along connecting lines
+  # Order matches line segments: gd, dn, cn, gc, gr, rn
+  results_list <- list(r.gd, r.dn, r.cn, r.gc, r.gr, r.rn)
+  xt <- c(30, 30, 50, 50, 70, 70)
+  yt <- c(72.5, 27.5, 27.5, 72.5, 72.5, 27.5)
+  at <- c(0.9, 0.9, 0.5, 0.5, 0.1, 0.1)
+
+  for (i in 1:6)
+    text(xt[i], yt[i],
+         substitute(chi^2 == rest,
+           list(rest = paste(formatC(results_list[[i]]$chisq, format = "f", digits = 3),
+                             ", p=",
+                             formatC(results_list[[i]]$p,     format = "f", digits = 3)))),
+         adj = c(at[i], 0.5))
+
+  # Return a tidy summary data frame for download
+  invisible(
+    data.frame(
+      Model     = c("Dominant", "Co-dominant", "Recessive", "Genotype"),
+      OR        = c(OR.d[1,1], OR.c[1,1], OR.r[1,1], NA),
+      CI_lower  = c(OR.d[1,2], OR.c[1,2], OR.r[1,2], NA),
+      CI_upper  = c(OR.d[1,3], OR.c[1,3], OR.r[1,3], NA),
+      Chisq     = c(r.dn$chisq, r.cn$chisq, r.rn$chisq, r.gn$chisq),
+      p_value   = c(r.dn$p,     r.cn$p,     r.rn$p,     r.gn$p)
+    )
+  )
+}
+
+
+# Reads and rounds the edited rhandsontable
 modified_table <- reactive({
   round(hot_to_r(req(input$dftbl1)))
 })
 
-# Extracts ca/co vectors from the transposed table
+# Extracts ca/co integer vectors from the table rows
 ca_co <- reactive({
   tbl <- modified_table()
   list(
@@ -87,7 +435,7 @@ ca_co <- reactive({
   )
 })
 
-# Live HWE computation
+# Live HWE computation (method driven by radioButtons input)
 hwe_reactive <- reactive({
   d <- ca_co()
   hwe_pvalues(d$ca, d$co, method = input$hwe_method)
@@ -109,7 +457,7 @@ global <- reactiveValues(df = df)
 rHandsontableOutput("dftbl1")
 
 output$dftbl1 <- renderRHandsontable({
-  rhandsontable(global$df, selectCallback = TRUE, readOnly = FALSE) %>%
+  rhandsontable(global$df, selectCallback = TRUE, readOnly = FALSE, rowHeaderWidth = 80) %>%
     hot_context_menu(allowRowEdit = FALSE, allowColEdit = FALSE) %>%
     hot_validate_numeric(col = c("WT", "Het", "Hom"), min = 0, allowInvalid = FALSE)
 })
@@ -201,313 +549,6 @@ Row
 ### Result
 
 ```{r}
-
-# --------------------------------------------------------------------
-# Exact test of Hardy-Weinberg Equilibrium
-# Wigginton JE, Cutler DJ, Abecasis GR (2005). A Note on Exact Tests of
-# Hardy-Weinberg Equilibrium. American Journal of Human Genetics, 76(5):887-893.
-# NOTE: returns -1.0 on invalid input
-# --------------------------------------------------------------------
-SNPHWE <- function(obs_hets, obs_hom1, obs_hom2) {
-  if (obs_hom1 < 0 || obs_hom2 < 0 || obs_hets < 0)
-    return(-1.0)
-
-  N       <- obs_hom1 + obs_hom2 + obs_hets
-  obs_homr <- min(obs_hom1, obs_hom2)
-  obs_homc <- max(obs_hom1, obs_hom2)
-  rare    <- obs_homr * 2 + obs_hets
-
-  probs <- rep(0, 1 + rare)
-
-  mid <- floor(rare * (2 * N - rare) / (2 * N))
-  if ((mid %% 2) != (rare %% 2)) mid <- mid + 1
-
-  probs[mid + 1] <- 1.0
-  mysum <- 1.0
-
-  # Probabilities from midpoint downward
-  curr_hets <- mid
-  curr_homr <- (rare - mid) / 2
-  curr_homc <- N - curr_hets - curr_homr
-
-  while (curr_hets >= 2) {
-    probs[curr_hets - 1] <- probs[curr_hets + 1] * curr_hets *
-      (curr_hets - 1.0) / (4.0 * (curr_homr + 1.0) * (curr_homc + 1.0))
-    mysum     <- mysum + probs[curr_hets - 1]
-    curr_hets <- curr_hets - 2
-    curr_homr <- curr_homr + 1
-    curr_homc <- curr_homc + 1
-  }
-
-  # Probabilities from midpoint upward
-  curr_hets <- mid
-  curr_homr <- (rare - mid) / 2
-  curr_homc <- N - curr_hets - curr_homr
-
-  while (curr_hets <= rare - 2) {
-    probs[curr_hets + 3] <- probs[curr_hets + 1] * 4.0 * curr_homr *
-      curr_homc / ((curr_hets + 2.0) * (curr_hets + 1.0))
-    mysum     <- mysum + probs[curr_hets + 3]
-    curr_hets <- curr_hets + 2
-    curr_homr <- curr_homr - 1
-    curr_homc <- curr_homc - 1
-  }
-
-  target <- probs[obs_hets + 1]
-  p <- min(1.0, sum(probs[probs <= target]) / mysum)
-  return(p)
-}
-
-
-# --------------------------------------------------------------------
-# Check whether input data are sufficient for analysis
-# --------------------------------------------------------------------
-check_data_validity <- function(ca, co) {
-  if (sum(ca + co == 0) > 1) return(list(valid = FALSE,
-    msg = "At least two genotype groups must have observations."))
-  if (sum(ca) == 0) return(list(valid = FALSE,
-    msg = "There are no cases. Please enter case counts."))
-  if (sum(co) == 0) return(list(valid = FALSE,
-    msg = "There are no controls. Please enter control counts."))
-  return(list(valid = TRUE, msg = ""))
-}
-
-
-# --------------------------------------------------------------------
-# Compute HWE p-values (chi-square or exact) for cases, controls, both
-# --------------------------------------------------------------------
-hwe_pvalues <- function(ca, co, method = "chisq") {
-
-  hwe_chisq <- function(x) {
-    f   <- (2 * x[1] + x[2]) / (2 * sum(x))
-    e   <- c(f^2, 2 * f * (1 - f), (1 - f)^2) * sum(x)
-    tst <- sum((x - e)^2 / e)
-    p   <- 1 - pchisq(tst, 1)
-    list(stat = tst, p = p)
-  }
-
-  if (method == "exact") {
-    p.ca  <- SNPHWE(ca[2], ca[1], ca[3])
-    p.co  <- SNPHWE(co[2], co[1], co[3])
-    # Combined: sum of -2*log(p) ~ chi-sq(4) (Fisher's method)
-    t.2   <- -2 * (log(p.ca) + log(p.co))
-    p.2   <- 1 - pchisq(t.2, 4)
-    t.ca  <- NA
-    t.co  <- NA
-  } else {
-    r.ca  <- hwe_chisq(ca)
-    r.co  <- hwe_chisq(co)
-    t.ca  <- r.ca$stat;  p.ca <- r.ca$p
-    t.co  <- r.co$stat;  p.co <- r.co$p
-    t.2   <- t.ca + t.co
-    p.2   <- 1 - pchisq(t.2, 2)
-  }
-
-  list(t.ca = t.ca, p.ca = p.ca,
-       t.co = t.co, p.co = p.co,
-       t.2  = t.2,  p.2  = p.2)
-}
-
-
-# --------------------------------------------------------------------
-# Confidence interval matrix helper
-# --------------------------------------------------------------------
-ci.mat <- function(alpha = 0.05) {
-  ciM <- rbind(c(1, 1, 1), qnorm(1 - alpha / 2) * c(0, -1, 1))
-  colnames(ciM) <- c("Estimate",
-    paste0(formatC(100 *    alpha / 2,  format = "f", digits = 1), "%"),
-    paste0(formatC(100 * (1 - alpha / 2), format = "f", digits = 1), "%"))
-  ciM
-}
-
-
-# --------------------------------------------------------------------
-# Main plotting function
-# --------------------------------------------------------------------
-gtm <- function(ca, co,
-                flev = c("WT", "Het", "Hom"),
-                fnam = " ",
-                main = fnam) {
-
-  rlev <- c(rep(paste(flev[1:2], collapse = "/"), 2), flev[3])
-  dlev <- c(flev[1], rep(paste(flev[2:3], collapse = "/"), 2))
-  f.g  <- factor(flev)
-  f.d  <- factor(dlev, levels = unique(dlev))
-  v.c  <- 1:3
-  f.r  <- factor(rlev, levels = unique(rlev))
-
-  par(mar = c(0, 0, 2, 0), cex = 1.6)
-  plot(NA, type = "n", axes = FALSE, xlab = "", ylab = "",
-       xlim = c(-10, 100), ylim = c(0, 100), main = main)
-
-  # Print input data in upper left corner
-  xr <- cumsum(c(max(strwidth(c("GT", flev))),
-                 strwidth("Cases"),
-                 strwidth("Controls")) * 1.15) - 10
-  text(xr, rep(98, 3), c("", "Cases", "Controls"), adj = c(1, 0.5))
-  for (i in 1:3)
-    text(xr, rep(98 - 3 * i, 3),
-         c(flev[i], paste(c(ca[i], co[i]))), adj = c(1, 0.5))
-
-  # Guard: warn if data are marginal but still plottable
-  if (sum(c(ca, co) == 0) > 3)
-    text(-10, 80, "Warning: many zero cells — interpret with caution.",
-         font = 2, adj = 0)
-
-  # Fit models
-  nul <- glm(cbind(ca, co) ~ 1,   family = binomial)
-  gen <- glm(cbind(ca, co) ~ f.g, family = binomial)
-  dom <- glm(cbind(ca, co) ~ f.d, family = binomial)
-  cod <- glm(cbind(ca, co) ~ v.c, family = binomial)
-  rec <- glm(cbind(ca, co) ~ f.r, family = binomial)
-
-  # Model comparison: each model vs null, then genotype vs each sub-model
-  # Ordering: dom vs nul, cod vs nul, rec vs nul,
-  #           gen vs dom, gen vs cod, gen vs rec, gen vs nul
-  t.dn  <- anova(nul, dom, test = "Chisq")
-  t.cn  <- anova(nul, cod, test = "Chisq")
-  t.rn  <- anova(nul, rec, test = "Chisq")
-  t.gd  <- anova(dom, gen, test = "Chisq")
-  t.gc  <- anova(cod, gen, test = "Chisq")
-  t.gr  <- anova(rec, gen, test = "Chisq")
-  t.gn  <- anova(nul, gen, test = "Chisq")
-
-  extract <- function(a) list(chisq = abs(a[2, 4]), p = a[2, 5])
-  r.dn <- extract(t.dn); r.cn <- extract(t.cn); r.rn <- extract(t.rn)
-  r.gd <- extract(t.gd); r.gc <- extract(t.gc); r.gr <- extract(t.gr)
-  r.gn <- extract(t.gn)
-
-  # Odds ratio estimates
-  OR.g <- exp(summary(gen)$coef[-1, 1:2, drop = FALSE] %*% ci.mat())
-  OR.d <- exp(summary(dom)$coef[-1, 1:2, drop = FALSE] %*% ci.mat())
-  OR.c <- exp(summary(cod)$coef[-1, 1:2, drop = FALSE] %*% ci.mat())
-  OR.r <- exp(summary(rec)$coef[-1, 1:2, drop = FALSE] %*% ci.mat())
-
-  # Pad OR matrices in case of singularities
-  if (nrow(OR.g) < 2) OR.g <- rbind(OR.g, rep(NA, 3))
-  if (nrow(OR.d) == 0) OR.d <- matrix(NA, 1, 3)
-  if (nrow(OR.r) == 0) OR.r <- matrix(NA, 1, 3)
-
-  # Fall back to Fisher's exact test when zeros are present
-  gt1 <- rbind(co, ca)[, -3]
-  gt2 <- rbind(co, ca)[, -2]
-  if (any(gt1 == 0)) {
-    ft <- fisher.test(gt1)
-    OR.g[1, ] <- c(ft[["estimate"]], ft[["conf.int"]])
-  }
-  if (any(gt2 == 0)) {
-    ft <- fisher.test(gt2)
-    OR.g[2, ] <- c(ft[["estimate"]], ft[["conf.int"]])
-  }
-  dot <- rbind(co, ca) %*% cbind(c(1, 0, 0), c(0, 1, 1))
-  if (any(dot == 0)) {
-    ft <- fisher.test(dot)
-    OR.d[1, ] <- c(ft[["estimate"]], ft[["conf.int"]])
-  }
-  if (sum(wh <- (ca + co > 0)) < 3) {
-    cot <- rbind(co, ca)[, wh]
-    if (any(cot == 0)) {
-      ft <- fisher.test(cot)
-      OR.c[1, ] <- c(ft[["estimate"]], ft[["conf.int"]])
-      if (!wh[2]) OR.c <- sqrt(OR.c)
-    }
-  }
-  rct <- rbind(co, ca) %*% cbind(c(1, 1, 0), c(0, 0, 1))
-  if (any(rct == 0)) {
-    ft <- fisher.test(rct)
-    OR.r[1, ] <- c(ft[["estimate"]], ft[["conf.int"]])
-  }
-
-  # Genotype model — top centre
-  text(50, 98, "Genotype model", font = 2)
-  text(50, 95, paste("OR(", flev[2], "vs.", flev[1], "):",
-                     formatC(OR.g[1, 1], format = "f", digits = 2),
-                     "(", formatC(OR.g[1, 2], format = "f", digits = 2),
-                     ";", formatC(OR.g[1, 3], format = "f", digits = 2), ")"))
-  text(50, 92, paste("OR(", flev[3], "vs.", flev[1], "):",
-                     formatC(OR.g[2, 1], format = "f", digits = 2),
-                     "(", formatC(OR.g[2, 2], format = "f", digits = 2),
-                     ";", formatC(OR.g[2, 3], format = "f", digits = 2), ")"))
-
-  # Dominant model — left
-  text(0, 53, "Dominant", adj = c(0, 0.5), font = 2)
-  text(0, 50, paste("OR(", dlev[2], "vs.", dlev[1], "):"), adj = c(0, 0.5))
-  text(0, 47, paste(formatC(OR.d[1, 1], format = "f", digits = 2),
-                    "(", formatC(OR.d[1, 2], format = "f", digits = 2),
-                    ";", formatC(OR.d[1, 3], format = "f", digits = 2), ")"),
-       adj = c(0, 0.5))
-
-  # Co-dominant model — centre
-  text(50, 53, "Co-dominant", adj = c(0.5, 0.5), font = 2)
-  text(50, 50, paste("OR(", flev[3], "vs.", flev[2], ")=",
-                     "OR(", flev[2], "vs.", flev[1], "):"), adj = c(0.5, 0.5))
-  text(50, 47, paste(formatC(OR.c[1, 1], format = "f", digits = 2),
-                     "(", formatC(OR.c[1, 2], format = "f", digits = 2),
-                     ";", formatC(OR.c[1, 3], format = "f", digits = 2), ")"),
-       adj = c(0.5, 0.5))
-
-  # Recessive model — right
-  text(100, 53, "Recessive", adj = c(1, 0.5), font = 2)
-  text(100, 50, paste("OR(", rlev[3], "vs.", rlev[1], "):"), adj = c(1, 0.5))
-  text(100, 47, paste(formatC(OR.r[1, 1], format = "f", digits = 2),
-                      "(", formatC(OR.r[1, 2], format = "f", digits = 2),
-                      ";", formatC(OR.r[1, 3], format = "f", digits = 2), ")"),
-       adj = c(1, 0.5))
-
-  # Null model — bottom centre
-  text(50, 8, "Null model", adj = c(0.5, 0.5), font = 2)
-  text(50, 5, "OR = 1", adj = c(0.5, 0.5))
-  text(50, 2, substitute(chi^2 * rest,
-    list(rest = paste("(2)=", formatC(r.gn$chisq, format = "f", digits = 3),
-                      ", p=", formatC(r.gn$p,     format = "f", digits = 3)))),
-    adj = c(0.5, 0.5))
-
-  # Connecting lines — quadruple width (lwd=8) when p >= 0.05,
-  # indicating the simpler model is a plausible fit relative to the more complex one
-  lwd_for <- function(p) if (!is.na(p) && p >= 0.05) 8 else 2
-
-  lines(c(40, 10), c(90, 55), lwd = lwd_for(r.gd$p))  # Genotype  -> Dominant
-  lines(c(10, 40), c(45, 10), lwd = lwd_for(r.dn$p))  # Dominant  -> Null
-  lines(c(50, 50), c(10, 45), lwd = lwd_for(r.cn$p))  # Null      -> Co-dominant
-  lines(c(50, 50), c(55, 90), lwd = lwd_for(r.gc$p))  # Co-dominant -> Genotype
-  lines(c(60, 90), c(90, 55), lwd = lwd_for(r.gr$p))  # Genotype  -> Recessive
-  lines(c(90, 60), c(45, 10), lwd = lwd_for(r.rn$p))  # Recessive -> Null
-
-  rect(0, 25, 100, 30, col = "white", border = "white")
-  rect(0, 70, 100, 75, col = "white", border = "white")
-
-  # Test statistics along connecting lines
-  # Order matches line segments: gd, dn, cn, gc, gr, rn
-  results_list <- list(r.gd, r.dn, r.cn, r.gc, r.gr, r.rn)
-  xt <- c(30, 30, 50, 50, 70, 70)
-  yt <- c(72.5, 27.5, 27.5, 72.5, 72.5, 27.5)
-  at <- c(0.9, 0.9, 0.5, 0.5, 0.1, 0.1)
-
-  for (i in 1:6)
-    text(xt[i], yt[i],
-         substitute(chi^2 == rest,
-           list(rest = paste(formatC(results_list[[i]]$chisq, format = "f", digits = 3),
-                             ", p=",
-                             formatC(results_list[[i]]$p,     format = "f", digits = 3)))),
-         adj = c(at[i], 0.5))
-
-  # Return a tidy summary data frame for download
-  invisible(
-    data.frame(
-      Model     = c("Dominant", "Co-dominant", "Recessive", "Genotype"),
-      OR        = c(OR.d[1,1], OR.c[1,1], OR.r[1,1], NA),
-      CI_lower  = c(OR.d[1,2], OR.c[1,2], OR.r[1,2], NA),
-      CI_upper  = c(OR.d[1,3], OR.c[1,3], OR.r[1,3], NA),
-      Chisq     = c(r.dn$chisq, r.cn$chisq, r.rn$chisq, r.gn$chisq),
-      p_value   = c(r.dn$p,     r.cn$p,     r.rn$p,     r.gn$p)
-    )
-  )
-}
-
-
-# --------------------------------------------------------------------
-# Plot
-# --------------------------------------------------------------------
 renderPlot({
   d     <- ca_co()
   ca    <- d$ca
