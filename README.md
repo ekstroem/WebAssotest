@@ -42,7 +42,7 @@ Likelihood-ratio tests compare each pair of nested models. Lines in the diagram 
 - The following R packages:
 
 ```r
-install.packages(c("flexdashboard", "tidyverse", "rhandsontable", "shinyscreenshot"))
+install.packages(c("flexdashboard", "rhandsontable", "shinyscreenshot"))
 ```
 
 ### Launch

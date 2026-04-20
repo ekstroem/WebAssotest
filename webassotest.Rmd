@@ -60,6 +60,21 @@ div.chart-title {
 .handsontable tbody th {
   text-align: left !important;
 }
+
+/* Save buttons: centred column, equal width */
+.save-buttons {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  gap: 10px;
+}
+.save-buttons .btn {
+  width: 220px !important;
+  height: auto !important;
+  align-self: center;
+}
 </style>
 
 
@@ -510,12 +525,17 @@ output$hwe_table <- renderUI({
 ### Save your work
 
 ```{r}
-screenshotButton(selector = "body",
-                 label    = "  Take a screenshot",
-                 filename = "webassotest",
-                 download = TRUE)
-
-downloadButton("download_results", "  Download results (.csv)")
+tags$div(
+  class = "save-buttons",
+  screenshotButton(selector = "body",
+                   label    = " Take a screenshot",
+                   filename = "webassotest",
+                   download = TRUE,
+                   style    = "width: 220px;"),
+  downloadButton("download_results",
+                 label = " Download results (.csv)",
+                 style = "width: 220px;")
+)
 
 output$download_results <- downloadHandler(
   filename = function() paste0("webassotest_results_", Sys.Date(), ".csv"),
