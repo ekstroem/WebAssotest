@@ -71,9 +71,15 @@ div.chart-title {
   gap: 10px;
 }
 .save-buttons .btn {
-  width: 220px !important;
-  height: auto !important;
-  align-self: center;
+  width: 100% !important;
+  flex: 1;
+  display: flex !important;
+  align-items: center;
+  justify-content: center;
+  font-size: 16pt !important;
+  background-color: #c8e6c9 !important;
+  border-color: #a5d6a7 !important;
+  color: #1b5e20 !important;
 }
 </style>
 
@@ -289,7 +295,7 @@ gtm <- function(ca, co,
 
   par(mar = c(0, 0, 2, 0), cex = 1.6)
   plot(NA, type = "n", axes = FALSE, xlab = "", ylab = "",
-       xlim = c(-10, 100), ylim = c(0, 100), main = main)
+       xlim = c(-10, 100), ylim = c(-5, 105), main = main)
 
   # Guard: warn if data are marginal but still plottable
   if (sum(c(ca, co) == 0) > 3)
@@ -479,7 +485,7 @@ Data analysis
 Row {data-height=180}
 -------------------------------------
 
-### Data input
+### Data input {data-width=250}
 
 ```{r}
 global <- reactiveValues(df = df)
@@ -493,19 +499,14 @@ output$dftbl1 <- renderRHandsontable({
 })
 ```
 
-### HWE test
+### Hardy-Weinberg equilibrium {data-width=450}
 
 ```{r}
 radioButtons("hwe_method",
-             label = "Hardy-Weinberg test method",
+             label = "Test method",
              choices = c("Chi-square" = "chisq", "Exact (Wigginton 2005)" = "exact"),
              selected = "chisq")
 
-```
-
-### HWE results
-
-```{r}
 uiOutput("hwe_table")
 
 output$hwe_table <- renderUI({
@@ -541,7 +542,7 @@ output$hwe_table <- renderUI({
 })
 ```
 
-### Save your work
+### Save your work {data-width=200}
 
 ```{r}
 tags$div(
@@ -549,11 +550,9 @@ tags$div(
   screenshotButton(selector = "body",
                    label    = " Take a screenshot",
                    filename = "webassotest",
-                   download = TRUE,
-                   style    = "width: 220px;"),
+                   download = TRUE),
   downloadButton("download_results",
-                 label = " Download results (.csv)",
-                 style = "width: 220px;")
+                 label = " Download results (.csv)")
 )
 
 output$download_results <- downloadHandler(
