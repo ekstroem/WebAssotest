@@ -232,6 +232,19 @@ hwe_pvalues <- function(ca, co, method = "chisq") {
 #   exp(summary(fit)$coef[, 1:2] %*% ci.mat())
 # gives the OR with 95% CIs directly from log-OR and its SE.
 # --------------------------------------------------------------------
+# --------------------------------------------------------------------
+# maf(x)
+# x: integer vector of length 3 (WT, Het, Hom counts).
+# Returns the minor allele frequency, or NA when total count is zero.
+# --------------------------------------------------------------------
+maf <- function(x) {
+  n <- sum(x)
+  if (n == 0) return(NA)
+  p <- (2 * x[1] + x[2]) / (2 * n)   # reference allele frequency
+  min(p, 1 - p)
+}
+
+
 ci.mat <- function(alpha = 0.05) {
   ciM <- rbind(c(1, 1, 1), qnorm(1 - alpha / 2) * c(0, -1, 1))
   colnames(ciM) <- c("Estimate",
@@ -422,15 +435,17 @@ gtm <- function(ca, co,
                              formatC(results_list[[i]]$p,     format = "f", digits = 3)))),
          adj = c(at[i], 0.5))
 
-  # Return a tidy summary data frame for download
+  # Return a tidy summary data frame for download.
+  # Null row included so AIC values span all five models for comparison.
   invisible(
     data.frame(
-      Model     = c("Dominant", "Co-dominant", "Recessive", "Genotype"),
-      OR        = c(OR.d[1,1], OR.c[1,1], OR.r[1,1], NA),
-      CI_lower  = c(OR.d[1,2], OR.c[1,2], OR.r[1,2], NA),
-      CI_upper  = c(OR.d[1,3], OR.c[1,3], OR.r[1,3], NA),
-      Chisq     = c(r.dn$chisq, r.cn$chisq, r.rn$chisq, r.gn$chisq),
-      p_value   = c(r.dn$p,     r.cn$p,     r.rn$p,     r.gn$p)
+      Model    = c("Null", "Dominant", "Co-dominant", "Recessive", "Genotype"),
+      OR       = c(NA,        OR.d[1,1], OR.c[1,1], OR.r[1,1], NA),
+      CI_lower = c(NA,        OR.d[1,2], OR.c[1,2], OR.r[1,2], NA),
+      CI_upper = c(NA,        OR.d[1,3], OR.c[1,3], OR.r[1,3], NA),
+      Chisq    = c(NA,        r.dn$chisq, r.cn$chisq, r.rn$chisq, r.gn$chisq),
+      p_value  = c(NA,        r.dn$p,     r.cn$p,     r.rn$p,     r.gn$p),
+      AIC      = c(AIC(nul),  AIC(dom),   AIC(cod),   AIC(rec),   AIC(gen))
     )
   )
 }
@@ -500,14 +515,18 @@ output$hwe_table <- renderUI({
   hwe          <- hwe_reactive()
   method_label <- if (input$hwe_method == "exact") "Exact H-W test" else "Chi-sq H-W test"
   stat_header  <- if (input$hwe_method == "exact") "\u2014" else "\u03c7\u00b2"
+  fmt_maf <- function(x) if (is.na(x)) "\u2014" else formatC(x, format = "f", digits = 3)
   rows <- list(
     c("Cases",
+      fmt_maf(maf(d$ca)),
       if (is.na(hwe$t.ca)) "\u2014" else formatC(hwe$t.ca, format = "f", digits = 3),
       formatC(hwe$p.ca, format = "f", digits = 3)),
     c("Controls",
+      fmt_maf(maf(d$co)),
       if (is.na(hwe$t.co)) "\u2014" else formatC(hwe$t.co, format = "f", digits = 3),
       formatC(hwe$p.co, format = "f", digits = 3)),
     c("Both",
+      fmt_maf(maf(d$ca + d$co)),
       formatC(hwe$t.2, format = "f", digits = 3),
       formatC(hwe$p.2, format = "f", digits = 3))
   )
@@ -515,7 +534,7 @@ output$hwe_table <- renderUI({
     tags$b(method_label),
     tags$table(
       class = "table table-sm table-bordered",
-      tags$thead(tags$tr(tags$th("Group"), tags$th(stat_header), tags$th("p"))),
+      tags$thead(tags$tr(tags$th("Group"), tags$th("MAF"), tags$th(stat_header), tags$th("p"))),
       tags$tbody(lapply(rows, function(r) tags$tr(lapply(r, tags$td))))
     )
   )
@@ -555,7 +574,7 @@ output$download_results <- downloadHandler(
     write.csv(rbind(
       cbind(Section = "Model results", res),
       cbind(Section = "HWE test", setNames(
-        data.frame(hwe_df$Group, NA, NA, NA, hwe_df$HWE_stat, hwe_df$HWE_p),
+        data.frame(hwe_df$Group, NA, NA, NA, hwe_df$HWE_stat, hwe_df$HWE_p, NA),
         names(res)))
     ), file, row.names = FALSE)
   }
