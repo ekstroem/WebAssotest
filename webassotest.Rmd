@@ -6,7 +6,7 @@ output:
     navbar:
       - { title: "About", href: "#about", align: right, icon: glyphicon-info-sign}
     orientation: rows
-    vertical_layout: fill
+    vertical_layout: scroll
     social: menu
     theme:
       version: 4
@@ -38,6 +38,20 @@ div.navbar-header {
 
 div.chart-title {
   font-size: 28pt;
+}
+
+@media (max-width: 1200px) {
+  body           { font-size: 13pt; }
+  h1,h2,h3,h4,h5,h6 { font-size: 18pt; }
+  .navbar-brand  { font-size: 24px; }
+  div.navbar-header, div.chart-title { font-size: 20pt; }
+}
+
+@media (max-width: 768px) {
+  body           { font-size: 11pt; }
+  h1,h2,h3,h4,h5,h6 { font-size: 15pt; }
+  .navbar-brand  { font-size: 18px; }
+  div.navbar-header, div.chart-title { font-size: 16pt; }
 }
 
 /* Center the page-loaded date in the navbar */
@@ -86,6 +100,31 @@ div.chart-title {
 
 
 ```{r setup, include=FALSE}
+# --------------------------------------------------------------------
+# App architecture overview
+#
+# This is a single-file Shiny flexdashboard. UI and server logic are
+# both defined in R chunks; there is no separate ui.R / server.R.
+#
+# Layout (orientation: rows, vertical_layout: scroll):
+#   Row 1 — three panels side by side (1/6 | 2/3 | 1/6 of width):
+#     · Data input    — rhandsontable for genotype counts
+#     · HWE           — test method selector + results table
+#     · Save work     — screenshot and CSV download buttons
+#   Row 2 — full-width model-comparison diagram
+#
+# Reactive chain:
+#   input$dftbl1 (table edits)
+#     └─► modified_table  — rounds raw rhandsontable values
+#           └─► ca_co     — extracts ca/co integer vectors
+#                 ├─► hwe_reactive ──► output$hwe_table  (HWE panel)
+#                 └─────────────────► output$result_plot (diagram)
+#
+# Pure functions defined below (before reactives so they are available
+# to all outputs): SNPHWE, check_data_validity, hwe_pvalues, maf,
+# ci.mat, gtm.
+# --------------------------------------------------------------------
+
 library("flexdashboard")
 library("rhandsontable")
 library("shinyscreenshot")
@@ -231,14 +270,6 @@ hwe_pvalues <- function(ca, co, method = "chisq") {
 
 
 # --------------------------------------------------------------------
-# ci.mat(alpha)
-# Returns a 2x3 matrix for simultaneous Wald CI computation.
-# Post-multiply a [estimate, se] matrix by ci.mat() to obtain
-# [estimate, lower, upper] in one step — e.g.:
-#   exp(summary(fit)$coef[, 1:2] %*% ci.mat())
-# gives the OR with 95% CIs directly from log-OR and its SE.
-# --------------------------------------------------------------------
-# --------------------------------------------------------------------
 # maf(x)
 # x: integer vector of length 3 (WT, Het, Hom counts).
 # Returns the minor allele frequency, or NA when total count is zero.
@@ -251,6 +282,14 @@ maf <- function(x) {
 }
 
 
+# --------------------------------------------------------------------
+# ci.mat(alpha)
+# Returns a 2x3 matrix for simultaneous Wald CI computation.
+# Post-multiply a [estimate, se] matrix by ci.mat() to obtain
+# [estimate, lower, upper] in one step — e.g.:
+#   exp(summary(fit)$coef[, 1:2] %*% ci.mat())
+# gives the OR with 95% CIs directly from log-OR and its SE.
+# --------------------------------------------------------------------
 ci.mat <- function(alpha = 0.05) {
   ciM <- rbind(c(1, 1, 1), qnorm(1 - alpha / 2) * c(0, -1, 1))
   colnames(ciM) <- c("Estimate",
@@ -293,7 +332,8 @@ gtm <- function(ca, co,
   v.c  <- 1:3
   f.r  <- factor(rlev, levels = unique(rlev))
 
-  par(mar = c(0, 0, 2, 0), cex = 1.6)
+  old <- par(mar = c(0, 0, 2, 0), cex = 1.6)
+  on.exit(par(old))
   plot(NA, type = "n", axes = FALSE, xlab = "", ylab = "",
        xlim = c(-10, 100), ylim = c(-5, 105), main = main)
 
@@ -482,16 +522,23 @@ hwe_reactive <- reactive({
 Data analysis
 =====================================
 
-Row {data-height=180}
+Row {data-height=320}
 -------------------------------------
 
-### Data input {data-width=250}
+### Data input {data-width=2}
 
 ```{r}
+# global holds the initial table state used to seed the rhandsontable widget.
+# After first render, all edits are captured via input$dftbl1 (hot_to_r);
+# global is never mutated.
 global <- reactiveValues(df = df)
 
 rHandsontableOutput("dftbl1")
 
+# Render the editable 2x3 genotype count table.
+# Row/column editing is disabled — only cell values can be changed.
+# Numeric validation enforces non-negative values and prevents non-numeric input.
+# rowHeaderWidth = 80 ensures "Cases" / "Controls" labels are not clipped.
 output$dftbl1 <- renderRHandsontable({
   rhandsontable(global$df, selectCallback = TRUE, readOnly = FALSE, rowHeaderWidth = 80) %>%
     hot_context_menu(allowRowEdit = FALSE, allowColEdit = FALSE) %>%
@@ -499,16 +546,28 @@ output$dftbl1 <- renderRHandsontable({
 })
 ```
 
-### Hardy-Weinberg equilibrium {data-width=450}
+### Hardy-Weinberg equilibrium {data-width=8}
 
 ```{r}
+# Radio buttons select between chi-square and Wigginton exact HWE tests.
+# The choice propagates to hwe_reactive, which drives both the table display
+# and the HWE section of the CSV download.
 radioButtons("hwe_method",
              label = "Test method",
              choices = c("Chi-square" = "chisq", "Exact (Wigginton 2005)" = "exact"),
              selected = "chisq")
 
+# uiOutput placeholder; filled by output$hwe_table below.
 uiOutput("hwe_table")
 
+# Renders the HWE results as an HTML table with four columns:
+#   Group | MAF | test statistic | p-value
+# Rows: Cases, Controls, Both (combined via Fisher's method or sum of chi-sq).
+# Returns an error message paragraph instead of the table when input is invalid.
+# The stat column header and "Both" row statistic differ by method:
+#   chi-sq:  individual chi-sq stats; combined = sum ~ chi-sq(2)
+#   exact:   individual stats are NA (shown as \u2014); combined uses Fisher's
+#            method: -2*(log(p_ca) + log(p_co)) ~ chi-sq(4)
 output$hwe_table <- renderUI({
   d     <- ca_co()
   check <- check_data_validity(d$ca, d$co)
@@ -542,9 +601,12 @@ output$hwe_table <- renderUI({
 })
 ```
 
-### Save your work {data-width=200}
+### Save your work {data-width=2}
 
 ```{r}
+# Two full-width buttons stacked vertically and centred via .save-buttons CSS.
+# screenshotButton captures the entire page body as a PNG.
+# downloadButton triggers output$download_results below.
 tags$div(
   class = "save-buttons",
   screenshotButton(selector = "body",
@@ -555,6 +617,23 @@ tags$div(
                  label = " Download results (.csv)")
 )
 
+# CSV download handler — produces a single file with two sections:
+#
+#   Section = "Model results":
+#     One row per model (Null, Dominant, Co-dominant, Recessive, Genotype).
+#     Columns: Model, OR, CI_lower, CI_upper, Chisq (vs. null), p_value, AIC.
+#     OR/CI are NA for Null and Genotype (no single-parameter contrast).
+#     Chisq/p_value for each model is its LRT against the null.
+#     AIC spans all five models to enable direct model comparison.
+#
+#   Section = "HWE test":
+#     One row per group (Cases, Controls, Both).
+#     Non-HWE columns are NA; HWE stat and p-value use the currently
+#     selected method (chi-square or exact).
+#
+# gtm() is called for its invisible return value (model summary data frame);
+# the resulting plot is discarded since we are inside a download handler,
+# not a render context.
 output$download_results <- downloadHandler(
   filename = function() paste0("webassotest_results_", Sys.Date(), ".csv"),
   content  = function(file) {
@@ -581,20 +660,31 @@ output$download_results <- downloadHandler(
 ```
 
 
-Row
+Row {data-height=1100}
 -------------------------------------
 
 ### Result
 
 ```{r}
-renderPlot({
+# plotOutput and renderPlot are declared separately (rather than using the
+# inline renderPlot({}) shorthand) so that height can be set via CSS ("75vh")
+# rather than being polled by JavaScript. The inline shorthand triggers a
+# Shiny resize-observer loop that causes the plot to jump when other reactive
+# outputs update; the explicit split avoids this.
+#
+# res = 96 pins rendering resolution to standard screen DPI for consistency.
+# validate() shows a user-facing message instead of an R error when input fails
+# check_data_validity().
+plotOutput("result_plot", height = "75vh")
+
+output$result_plot <- renderPlot({
   d     <- ca_co()
   ca    <- d$ca
   co    <- d$co
   check <- check_data_validity(ca, co)
   validate(need(check$valid, check$msg))
   gtm(ca, co)
-})
+}, res = 96)
 ```
 
 
