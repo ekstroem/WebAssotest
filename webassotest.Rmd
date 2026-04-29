@@ -75,6 +75,11 @@ div.chart-title {
   text-align: left !important;
 }
 
+/* Shrink rhandsontable output container to its table content height */
+#dftbl1 {
+  height: auto !important;
+}
+
 /* Save buttons: centred column, equal width */
 .save-buttons {
   display: flex;
@@ -128,6 +133,7 @@ div.chart-title {
 library("flexdashboard")
 library("rhandsontable")
 library("shinyscreenshot")
+library("logistf")
 
 # Default genotype count table — rows: Cases/Controls, cols: WT/Het/Hom
 df <- data.frame(
@@ -300,11 +306,14 @@ ci.mat <- function(alpha = 0.05) {
 
 
 # --------------------------------------------------------------------
-# gtm(ca, co, flev, fnam, main)
+# gtm(ca, co, flev, fnam, main, firth)
 # ca, co: integer vectors of length 3 (WT, Het, Hom counts).
 # flev: genotype level labels. fnam/main: plot title.
+# firth: if TRUE, use Firth's penalized logistic regression (logistf
+#   package); CIs are profile-likelihood-based and no Fisher fallback
+#   is applied (Firth handles separation natively).
 #
-# Fits five nested logistic regression models via glm(..., binomial):
+# Fits five nested logistic regression models:
 #   nul: intercept only (no association)
 #   gen: factor(WT/Het/Hom) — genotype model, 2 df
 #   dom: factor(WT vs Het+Hom) — dominant model, 1 df
@@ -323,13 +332,14 @@ ci.mat <- function(alpha = 0.05) {
 gtm <- function(ca, co,
                 flev = c("WT", "Het", "Hom"),
                 fnam = " ",
-                main = fnam) {
+                main = fnam,
+                firth = FALSE) {
 
   rlev <- c(rep(paste(flev[1:2], collapse = "/"), 2), flev[3])
   dlev <- c(flev[1], rep(paste(flev[2:3], collapse = "/"), 2))
-  f.g  <- factor(flev)
+  f.g  <- factor(flev, levels=c("WT", "Het", "Hom"))
   f.d  <- factor(dlev, levels = unique(dlev))
-  v.c  <- 1:3
+  v.c  <- 0:2
   f.r  <- factor(rlev, levels = unique(rlev))
 
   old <- par(mar = c(0, 0, 2, 0), cex = 1.6)
@@ -342,32 +352,65 @@ gtm <- function(ca, co,
     text(-10, 80, "Warning: many zero cells — interpret with caution.",
          font = 2, adj = 0)
 
-  # Fit models
-  nul <- glm(cbind(ca, co) ~ 1,   family = binomial)
-  gen <- glm(cbind(ca, co) ~ f.g, family = binomial)
-  dom <- glm(cbind(ca, co) ~ f.d, family = binomial)
-  cod <- glm(cbind(ca, co) ~ v.c, family = binomial)
-  rec <- glm(cbind(ca, co) ~ f.r, family = binomial)
-
-  # Likelihood-ratio tests for all nested pairs
-  t.dn  <- anova(nul, dom, test = "Chisq")
-  t.cn  <- anova(nul, cod, test = "Chisq")
-  t.rn  <- anova(nul, rec, test = "Chisq")
-  t.gd  <- anova(dom, gen, test = "Chisq")
-  t.gc  <- anova(cod, gen, test = "Chisq")
-  t.gr  <- anova(rec, gen, test = "Chisq")
-  t.gn  <- anova(nul, gen, test = "Chisq")
-
-  extract <- function(a) list(chisq = abs(a[2, 4]), p = a[2, 5])
-  r.dn <- extract(t.dn); r.cn <- extract(t.cn); r.rn <- extract(t.rn)
-  r.gd <- extract(t.gd); r.gc <- extract(t.gc); r.gr <- extract(t.gr)
-  r.gn <- extract(t.gn)
-
-  # Odds ratio estimates (log-OR ± SE → OR with CI via ci.mat)
-  OR.g <- exp(summary(gen)$coef[-1, 1:2, drop = FALSE] %*% ci.mat())
-  OR.d <- exp(summary(dom)$coef[-1, 1:2, drop = FALSE] %*% ci.mat())
-  OR.c <- exp(summary(cod)$coef[-1, 1:2, drop = FALSE] %*% ci.mat())
-  OR.r <- exp(summary(rec)$coef[-1, 1:2, drop = FALSE] %*% ci.mat())
+  if (firth) {
+    # Firth's penalized logistic regression (logistf).
+    # logistf requires individual binary observations, not grouped counts.
+    y   <- c(rep(1L, sum(ca)), rep(0L, sum(co)))
+    grp <- c(rep(1:3, ca), rep(1:3, co))
+    nul <- logistf(y ~ 1)
+    gen <- logistf(y ~ factor(flev[grp], levels = flev))
+    dom <- logistf(y ~ factor(dlev[grp], levels = unique(dlev)))
+    cod <- logistf(y ~ grp)
+    rec <- logistf(y ~ factor(rlev[grp], levels = unique(rlev)))
+    plrt <- function(m_s, m_c) {
+      stat <- 2 * (m_c$loglik[2] - m_s$loglik[2])
+      df   <- length(m_c$coefficients) - length(m_s$coefficients)
+      list(chisq = abs(stat), p = 1 - pchisq(abs(stat), df))
+    }
+    r.dn <- plrt(nul, dom); r.cn <- plrt(nul, cod); r.rn <- plrt(nul, rec)
+    r.gd <- plrt(dom, gen); r.gc <- plrt(cod, gen); r.gr <- plrt(rec, gen)
+    r.gn <- plrt(nul, gen)
+    or_firth <- function(fit) {
+      cf <- fit$coefficients[-1]
+      matrix(c(exp(cf), exp(fit$ci.lower[-1]), exp(fit$ci.upper[-1])),
+             ncol = 3, dimnames = list(NULL, c("Estimate", "2.5%", "97.5%")))
+    }
+    OR.g <- or_firth(gen)
+    OR.d <- or_firth(dom)
+    OR.c <- or_firth(cod)
+    OR.r <- or_firth(rec)
+    aic_vals <- sapply(list(nul, dom, cod, rec, gen), function(fit)
+      2 * length(fit$coefficients) - 2 * fit$loglik[2])
+  } else {
+    # Standard grouped-binomial logistic regression via glm
+    nul <- glm(cbind(ca, co) ~ 1,   family = binomial)
+    gen <- glm(cbind(ca, co) ~ f.g, family = binomial)
+    dom <- glm(cbind(ca, co) ~ f.d, family = binomial)
+    cod <- glm(cbind(ca, co) ~ v.c, family = binomial)
+    rec <- glm(cbind(ca, co) ~ f.r, family = binomial)
+    print(gen)
+    print(cbind(ca, co))
+    print(v.c)
+    t.dn  <- anova(nul, dom, test = "Chisq")
+    t.cn  <- anova(nul, cod, test = "Chisq")
+    t.rn  <- anova(nul, rec, test = "Chisq")
+    t.gd  <- anova(dom, gen, test = "Chisq")
+    t.gc  <- anova(cod, gen, test = "Chisq")
+    t.gr  <- anova(rec, gen, test = "Chisq")
+    t.gn  <- anova(nul, gen, test = "Chisq")
+    extract <- function(a) list(chisq = abs(a[2, 4]), p = a[2, 5])
+    r.dn <- extract(t.dn); r.cn <- extract(t.cn); r.rn <- extract(t.rn)
+    r.gd <- extract(t.gd); r.gc <- extract(t.gc); r.gr <- extract(t.gr)
+    r.gn <- extract(t.gn)
+    OR.g <- exp(summary(gen)$coef[-1, 1:2, drop = FALSE] %*% ci.mat())
+    OR.d <- exp(summary(dom)$coef[-1, 1:2, drop = FALSE] %*% ci.mat())
+    OR.c <- exp(summary(cod)$coef[-1, 1:2, drop = FALSE] %*% ci.mat())
+    OR.r <- exp(summary(rec)$coef[-1, 1:2, drop = FALSE] %*% ci.mat())
+    aic_vals <- c(AIC(nul), AIC(dom), AIC(cod), AIC(rec), AIC(gen))
+  }
+  
+  cat("III")
+  print(OR.g)
 
   # Pad OR matrices in case of singularities (complete separation)
   if (nrow(OR.g) < 2) OR.g <- rbind(OR.g, rep(NA, 3))
@@ -375,38 +418,41 @@ gtm <- function(ca, co,
   if (nrow(OR.r) == 0) OR.r <- matrix(NA, 1, 3)
 
   # Fall back to Fisher's exact test when zeros are present.
-  # Each block checks the 2x2 table for the relevant contrast;
-  # if any cell is zero the logistic OR/CI is replaced by Fisher's.
-  gt1 <- rbind(co, ca)[, -3]   # WT vs Het
-  gt2 <- rbind(co, ca)[, -2]   # WT vs Hom
-  if (any(gt1 == 0)) {
-    ft <- fisher.test(gt1)
-    OR.g[1, ] <- c(ft[["estimate"]], ft[["conf.int"]])
-  }
-  if (any(gt2 == 0)) {
-    ft <- fisher.test(gt2)
-    OR.g[2, ] <- c(ft[["estimate"]], ft[["conf.int"]])
-  }
-  dot <- rbind(co, ca) %*% cbind(c(1, 0, 0), c(0, 1, 1))  # WT vs Het+Hom
-  if (any(dot == 0)) {
-    ft <- fisher.test(dot)
-    OR.d[1, ] <- c(ft[["estimate"]], ft[["conf.int"]])
-  }
-  if (sum(wh <- (ca + co > 0)) < 3) {
-    cot <- rbind(co, ca)[, wh]
-    if (any(cot == 0)) {
-      ft <- fisher.test(cot)
-      OR.c[1, ] <- c(ft[["estimate"]], ft[["conf.int"]])
-      # When the Het column is missing, the additive OR is per 2 copies;
-      # take the square root to recover the per-allele OR.
-      if (!wh[2]) OR.c <- sqrt(OR.c)
+  # Skipped for Firth regression — it handles separation natively.
+  if (!firth) {
+    gt1 <- rbind(co, ca)[, -3]   # WT vs Het
+    gt2 <- rbind(co, ca)[, -2]   # WT vs Hom
+    if (any(gt1 == 0)) {
+      ft <- fisher.test(gt1)
+      OR.g[1, ] <- c(ft[["estimate"]], ft[["conf.int"]])
+    }
+    if (any(gt2 == 0)) {
+      ft <- fisher.test(gt2)
+      OR.g[2, ] <- c(ft[["estimate"]], ft[["conf.int"]])
+    }
+    dot <- rbind(co, ca) %*% cbind(c(1, 0, 0), c(0, 1, 1))  # WT vs Het+Hom
+    if (any(dot == 0)) {
+      ft <- fisher.test(dot)
+      OR.d[1, ] <- c(ft[["estimate"]], ft[["conf.int"]])
+    }
+    if (sum(wh <- (ca + co > 0)) < 3) {
+      cot <- rbind(co, ca)[, wh]
+      if (any(cot == 0)) {
+        ft <- fisher.test(cot)
+        OR.c[1, ] <- c(ft[["estimate"]], ft[["conf.int"]])
+        # When the Het column is missing, the additive OR is per 2 copies;
+        # take the square root to recover the per-allele OR.
+        if (!wh[2]) OR.c <- sqrt(OR.c)
+      }
+    }
+    rct <- rbind(co, ca) %*% cbind(c(1, 1, 0), c(0, 0, 1))  # WT+Het vs Hom
+    if (any(rct == 0)) {
+      ft <- fisher.test(rct)
+      OR.r[1, ] <- c(ft[["estimate"]], ft[["conf.int"]])
     }
   }
-  rct <- rbind(co, ca) %*% cbind(c(1, 1, 0), c(0, 0, 1))  # WT+Het vs Hom
-  if (any(rct == 0)) {
-    ft <- fisher.test(rct)
-    OR.r[1, ] <- c(ft[["estimate"]], ft[["conf.int"]])
-  }
+  
+  print(OR.g)
 
   # Genotype model — top centre
   text(50, 98, "Genotype model", font = 2)
@@ -491,7 +537,7 @@ gtm <- function(ca, co,
       CI_upper = c(NA,        OR.d[1,3], OR.c[1,3], OR.r[1,3], NA),
       Chisq    = c(NA,        r.dn$chisq, r.cn$chisq, r.rn$chisq, r.gn$chisq),
       p_value  = c(NA,        r.dn$p,     r.cn$p,     r.rn$p,     r.gn$p),
-      AIC      = c(AIC(nul),  AIC(dom),   AIC(cod),   AIC(rec),   AIC(gen))
+      AIC      = aic_vals
     )
   )
 }
@@ -534,6 +580,8 @@ Row {data-height=320}
 global <- reactiveValues(df = df)
 
 rHandsontableOutput("dftbl1")
+
+checkboxInput("use_firth", "Use Firth's penalized regression", value = FALSE)
 
 # Render the editable 2x3 genotype count table.
 # Row/column editing is disabled — only cell values can be changed.
@@ -643,7 +691,7 @@ output$download_results <- downloadHandler(
     check <- check_data_validity(ca, co)
     req(check$valid)
     hwe <- hwe_pvalues(ca, co, method = input$hwe_method)
-    res <- gtm(ca, co)
+    res <- gtm(ca, co, firth = input$use_firth)
     hwe_df <- data.frame(
       Group    = c("Cases", "Controls", "Both"),
       HWE_stat = c(hwe$t.ca, hwe$t.co, hwe$t.2),
@@ -683,7 +731,7 @@ output$result_plot <- renderPlot({
   co    <- d$co
   check <- check_data_validity(ca, co)
   validate(need(check$valid, check$msg))
-  gtm(ca, co)
+  gtm(ca, co, firth = input$use_firth)
 }, res = 96)
 ```
 

@@ -10,9 +10,10 @@ A live version of the tool is available at [ekstroem.com](https://ekstroem.com) 
 
 - Interactive 3×2 genotype count table (WT / Het / Hom × Cases / Controls)
 - Simultaneous fitting of four genetic models: **dominant**, **recessive**, **co-dominant**, and **genotype**
+- Optional **Firth's penalized logistic regression** (via `logistf`) for robust handling of complete separation
 - Visual model comparison diagram with likelihood-ratio test statistics on each path; line width indicates which model transitions are statistically compatible with the data (p ≥ 0.05)
-- Hardy-Weinberg equilibrium test for cases, controls, and both combined — choice of **chi-square** or **exact test** (Wigginton et al., 2005)
-- Automatic fallback to Fisher's exact test for odds ratios when cells contain zeros
+- Hardy-Weinberg equilibrium test for cases, controls, and both combined — reports minor allele frequency (MAF) and choice of **chi-square** or **exact test** (Wigginton et al., 2005)
+- Automatic fallback to Fisher's exact test for odds ratios when cells contain zeros (standard mode only)
 - Screenshot export and CSV download of results
 - Fully browser-based; no software installation required for end users
 
@@ -42,7 +43,7 @@ Likelihood-ratio tests compare each pair of nested models. Lines in the diagram 
 - The following R packages:
 
 ```r
-install.packages(c("flexdashboard", "rhandsontable", "shinyscreenshot"))
+install.packages(c("flexdashboard", "rhandsontable", "shinyscreenshot", "logistf"))
 ```
 
 ### Launch
@@ -69,10 +70,7 @@ rsconnect::deployApp(appFiles = "webassotest.Rmd")
 ```
 WebAssotest/
 ├── webassotest.Rmd   # Main application source
-├── paper/
-│   ├── paper.md      # JOSS manuscript
-│   └── paper.bib     # References
-└── README.md
+└── README.md         # This file
 ```
 
 ---
