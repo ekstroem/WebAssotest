@@ -76,6 +76,13 @@ div.chart-title {
   height: auto !important;
 }
 
+/* Pin Data Input panel to table width */
+.input-panel {
+  flex: 0 0 260px !important;
+  max-width: 260px !important;
+  min-width: 0 !important;
+}
+
 /* Save buttons: centred column, equal width */
 .save-buttons {
   display: flex;
@@ -496,6 +503,7 @@ gtm <- function(ca, co,
                       ", p=", formatC(r.gn$p,     format = "f", digits = 3)))),
     adj = c(0.5, 0.5))
 
+  
   # Connecting lines: lwd=8 when p >= 0.05 (simpler model not rejected),
   # lwd=2 when rejected. Thick lines indicate compatible simplifications.
   lwd_for <- function(p) if (is.na(p) || p >= 0.05) 8 else 2
@@ -573,7 +581,7 @@ Data analysis
 Row {data-height=320}
 -------------------------------------
 
-### Data input {data-width=2}
+### Data input {data-width=2 .input-panel}
 
 ```{r}
 # global holds the initial table state used to seed the rhandsontable widget.
@@ -592,9 +600,12 @@ checkboxInput("use_firth", "Use Firth's penalized regression", value = FALSE)
 output$dftbl1 <- renderRHandsontable({
   rhandsontable(global$df, selectCallback = TRUE, readOnly = FALSE, rowHeaderWidth = 80) %>%
     hot_context_menu(allowRowEdit = FALSE, allowColEdit = FALSE) %>%
-    hot_validate_numeric(col = c("WT", "Het", "Hom"), min = 0, allowInvalid = FALSE)
+    hot_validate_numeric(col = c("WT", "Het", "Hom"), min = 0, allowInvalid = FALSE) %>%
+    hot_cols(colWidths = 45)
 })
 ```
+
+
 
 ### Hardy-Weinberg equilibrium {data-width=8}
 
@@ -651,7 +662,7 @@ output$hwe_table <- renderUI({
 })
 ```
 
-### Save your work {data-width=2}
+### Save your work {data-width=1}
 
 ```{r}
 # Two full-width buttons stacked vertically and centred via .save-buttons CSS.
