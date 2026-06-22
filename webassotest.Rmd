@@ -22,6 +22,7 @@ runtime: shiny
   font-size: 16pt;
 }
 
+
 h1,h2,h3,h4,h5,h6 {
   font-size: 24pt;
 }
@@ -76,10 +77,9 @@ div.chart-title {
   height: auto !important;
 }
 
-/* Pin Data Input panel to table width */
 .input-panel {
-  flex: 0 0 260px !important;
-  max-width: 260px !important;
+  flex: 2 1 0% !important;
+  max-width: none !important;
   min-width: 0 !important;
 }
 
@@ -102,6 +102,18 @@ div.chart-title {
   background-color: #c8e6c9 !important;
   border-color: #a5d6a7 !important;
   color: #1b5e20 !important;
+}
+
+.save-panel {
+  flex: 1 1 0% !important;
+  max-width: none !important;
+  min-width: 0 !important;
+}
+
+.hwe-panel {
+  flex: 4 1 0% !important;
+  max-width: none !important;
+  min-width: 0 !important;
 }
 </style>
 
@@ -155,6 +167,8 @@ df <- data.frame(
   Hom = c(30L, 30L)
 )
 rownames(df) <- c("Cases", "Controls")
+
+
 
 
 # --------------------------------------------------------------------
@@ -342,6 +356,7 @@ ci.mat <- function(alpha = 0.05) {
 #
 # Returns a summary data frame invisibly (used by the CSV download).
 # --------------------------------------------------------------------
+
 gtm <- function(ca, co,
                 flev = c("WT", "Het", "Hom"),
                 fnam = " ",
@@ -370,19 +385,28 @@ gtm <- function(ca, co,
     # logistf requires individual binary observations, not grouped counts.
     y   <- c(rep(1L, sum(ca)), rep(0L, sum(co)))
     grp <- c(rep(1:3, ca), rep(1:3, co))
-    nul <- logistf(y ~ 1)
-    gen <- logistf(y ~ factor(flev[grp], levels = flev))
-    dom <- logistf(y ~ factor(dlev[grp], levels = unique(dlev)))
-    cod <- logistf(y ~ grp)
-    rec <- logistf(y ~ factor(rlev[grp], levels = unique(rlev)))
-    plrt <- function(m_s, m_c) {
-      stat <- 2 * (m_c$loglik[2] - m_s$loglik[2])
-      df   <- length(m_c$coefficients) - length(m_s$coefficients)
-      list(chisq = abs(stat), p = 1 - pchisq(abs(stat), df))
-    }
-    r.dn <- plrt(nul, dom); r.cn <- plrt(nul, cod); r.rn <- plrt(nul, rec)
-    r.gd <- plrt(dom, gen); r.gc <- plrt(cod, gen); r.gr <- plrt(rec, gen)
-    r.gn <- plrt(nul, gen)
+    # Predictor vectors shared across models so anova() term-nesting check passes.
+    # x1 = dominant indicator (Het|Hom vs WT)
+    # x2 = recessive indicator (Hom vs WT|Het)
+    # xa = additive score (0/1/2 allele copies)
+    x1 <- as.integer(grp > 1)
+    x2 <- as.integer(grp == 3)
+    xa <- x1 + x2
+    nul    <- logistf(y ~ 1)
+    gen    <- logistf(y ~ factor(flev[grp], levels = flev))  # for OR extraction
+    gen_dr <- logistf(y ~ x1 + x2)   # dom/rec/nul anova parent; same loglik as gen
+    gen_ca <- logistf(y ~ xa + x2)   # cod anova parent; same loglik as gen
+    dom    <- logistf(y ~ x1)        # nested in gen_dr
+    cod    <- logistf(y ~ xa)        # nested in gen_ca
+    rec    <- logistf(y ~ x2)        # nested in gen_dr
+    plr  <- function(a) list(chisq = a$chisq, p = a$pval)
+    r.dn <- plr(anova(nul, dom))
+    r.cn <- plr(anova(nul, cod))
+    r.rn <- plr(anova(nul, rec))
+    r.gd <- plr(anova(dom, gen_dr))
+    r.gc <- plr(anova(cod, gen_ca))
+    r.gr <- plr(anova(rec, gen_dr))
+    r.gn <- plr(anova(nul, gen_dr))
     or_firth <- function(fit) {
       cf <- fit$coefficients[-1]
       matrix(c(exp(cf), exp(fit$ci.lower[-1]), exp(fit$ci.upper[-1])),
@@ -607,7 +631,7 @@ output$dftbl1 <- renderRHandsontable({
 
 
 
-### Hardy-Weinberg equilibrium {data-width=8}
+### Hardy-Weinberg equilibrium {data-width=4 .hwe-panel}
 
 ```{r}
 # Radio buttons select between chi-square and Wigginton exact HWE tests.
@@ -662,7 +686,7 @@ output$hwe_table <- renderUI({
 })
 ```
 
-### Save your work {data-width=1}
+### Save your work {data-width=1 .save-panel}
 
 ```{r}
 # Two full-width buttons stacked vertically and centred via .save-buttons CSS.
