@@ -612,6 +612,7 @@ hwe_reactive <- reactive({
 ```
 
 
+
 Data analysis
 =====================================
 
@@ -761,9 +762,15 @@ output$download_results <- downloadHandler(
 Row {data-height=1100}
 -------------------------------------
 
-### Result
+### Result `r textOutput("mode_label", inline = TRUE)`
 
 ```{r}
+# Parenthetical next to the "Result" heading showing which regression
+# method produced the plot below (toggled via the use_firth checkbox).
+output$mode_label <- renderText({
+  paste0("(", if (input$use_firth) "Firth's penalized regression" else "Standard logistic regression", ")")
+})
+
 # plotOutput and renderPlot are declared separately (rather than using the
 # inline renderPlot({}) shorthand) so that height can be set via CSS ("75vh")
 # rather than being polled by JavaScript. The inline shorthand triggers a
