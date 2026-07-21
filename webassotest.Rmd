@@ -782,14 +782,27 @@ output$mode_label <- renderText({
 # check_data_validity().
 plotOutput("result_plot", height = "75vh")
 
+# model_summary holds gtm()'s invisible return (Model/OR/CI/Chisq/p/AIC data
+# frame) so the AIC table below can reuse it without re-fitting the models.
+model_summary <- reactiveVal(NULL)
+
 output$result_plot <- renderPlot({
   d     <- ca_co()
   ca    <- d$ca
   co    <- d$co
   check <- check_data_validity(ca, co)
   validate(need(check$valid, check$msg))
-  gtm(ca, co, firth = input$use_firth)
+  model_summary(gtm(ca, co, firth = input$use_firth))
 }, res = 96)
+
+# Compact AIC comparison table — lower AIC indicates better relative fit.
+tableOutput("aic_table")
+output$aic_table <- renderTable({
+  req(model_summary())
+  df <- model_summary()[, c("Model", "AIC")]
+  df$AIC <- formatC(df$AIC, format = "f", digits = 1)
+  df
+}, striped = TRUE, width = "300px")
 ```
 
 
