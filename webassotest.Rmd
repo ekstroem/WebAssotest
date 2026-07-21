@@ -399,7 +399,16 @@ gtm <- function(ca, co,
     dom    <- logistf(y ~ x1)        # nested in gen_dr
     cod    <- logistf(y ~ xa)        # nested in gen_ca
     rec    <- logistf(y ~ x2)        # nested in gen_dr
-    plr  <- function(a) list(chisq = a$chisq, p = a$pval)
+    
+    # Small helper function to extract the test statistic and p value
+    plr  <- function(a) {
+      # formatC has an annoying rounding bnit that is set to negative when rounding numbers very close to zero
+      # Hence the next line to prevent the negative sign in th test statistics
+      
+      if (a$chisq<0.0000001)
+        a$chisq <- 0
+      list(chisq = a$chisq, p = a$pval)
+    }
     r.dn <- plr(anova(nul, dom))
     r.cn <- plr(anova(nul, cod))
     r.rn <- plr(anova(nul, rec))
@@ -545,13 +554,17 @@ gtm <- function(ca, co,
   # Test statistics along connecting lines
   # Order matches line segments: gd, dn, cn, gc, gr, rn
   results_list <- list(r.gd, r.dn, r.cn, r.gc, r.gr, r.rn)
+
   results_list <- lapply(results_list, function(r) {
     if (is.na(r$p) && !is.na(r$chisq) && r$chisq < 0.000001) r$p <- 1
     r
   })
+  
+  # Set the positions of the test statistics on th elines
   xt <- c(30, 30, 50, 50, 70, 70)
   yt <- c(72.5, 27.5, 27.5, 72.5, 72.5, 27.5)
   at <- c(0.9, 0.9, 0.5, 0.5, 0.1, 0.1)
+
 
   for (i in 1:6)
     text(xt[i], yt[i],
