@@ -365,7 +365,7 @@ gtm <- function(ca, co,
 
   rlev <- c(rep(paste(flev[1:2], collapse = "/"), 2), flev[3])
   dlev <- c(flev[1], rep(paste(flev[2:3], collapse = "/"), 2))
-  f.g  <- factor(flev, levels=c("WT", "Het", "Hom"))
+  f.g  <- factor(flev, levels = flev)
   f.d  <- factor(dlev, levels = unique(dlev))
   v.c  <- 0:2
   f.r  <- factor(rlev, levels = unique(rlev))
@@ -631,6 +631,27 @@ rHandsontableOutput("dftbl1")
 
 checkboxInput("use_firth", "Use Firth's penalized regression", value = FALSE)
 
+# Optional genotype/allele labels shown on the model-comparison diagram
+# instead of the generic WT/Het/Hom. Blank fields fall back to the default.
+# Plain flex div (not fluidRow/column) — this panel is a flex item with
+# max-width:none/min-width:0, and fluidRow's negative-margin grid overflows
+# that kind of parent instead of a bootstrap .container, which corrupts the
+# panel's layout and, via the resize observer, the plot below it.
+tags$div(
+  style = "display:flex; gap:8px;",
+  tags$div(style = "flex:1;", textInput("lbl_wt",  "WT label",  value = "WT")),
+  tags$div(style = "flex:1;", textInput("lbl_het", "Het label", value = "Het")),
+  tags$div(style = "flex:1;", textInput("lbl_hom", "Hom label", value = "Hom"))
+)
+
+# Genotype labels used by gtm() for plot text; blank entries fall back to
+# the WT/Het/Hom default so the diagram never shows an empty label.
+flev_labels <- reactive({
+  lbl <- c(input$lbl_wt, input$lbl_het, input$lbl_hom)
+  dflt <- c("WT", "Het", "Hom")
+  ifelse(is.na(lbl) | trimws(lbl) == "", dflt, trimws(lbl))
+})
+
 # Render the editable 2x3 genotype count table.
 # Row/column editing is disabled — only cell values can be changed.
 # Numeric validation enforces non-negative values and prevents non-numeric input.
@@ -742,7 +763,7 @@ output$download_results <- downloadHandler(
     check <- check_data_validity(ca, co)
     req(check$valid)
     hwe <- hwe_pvalues(ca, co, method = input$hwe_method)
-    res <- gtm(ca, co, firth = input$use_firth)
+    res <- gtm(ca, co, firth = input$use_firth, flev = flev_labels())
     hwe_df <- data.frame(
       Group    = c("Cases", "Controls", "Both"),
       HWE_stat = c(hwe$t.ca, hwe$t.co, hwe$t.2),
@@ -792,7 +813,7 @@ output$result_plot <- renderPlot({
   co    <- d$co
   check <- check_data_validity(ca, co)
   validate(need(check$valid, check$msg))
-  model_summary(gtm(ca, co, firth = input$use_firth))
+  model_summary(gtm(ca, co, firth = input$use_firth, flev = flev_labels()))
 }, res = 96)
 
 # Compact AIC comparison table — lower AIC indicates better relative fit.
