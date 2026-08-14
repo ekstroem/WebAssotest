@@ -77,7 +77,9 @@ div.chart-title {
   height: auto !important;
 }
 
-.input-panel {
+.input-panel,
+.analysis-panel,
+.hwe-panel {
   flex: 2 1 0% !important;
   max-width: none !important;
   min-width: 0 !important;
@@ -106,12 +108,6 @@ div.chart-title {
 
 .save-panel {
   flex: 1 1 0% !important;
-  max-width: none !important;
-  min-width: 0 !important;
-}
-
-.hwe-panel {
-  flex: 4 1 0% !important;
   max-width: none !important;
   min-width: 0 !important;
 }
@@ -619,7 +615,7 @@ Data analysis
 Row {data-height=320}
 -------------------------------------
 
-### Data input {data-width=2 .input-panel}
+### Data input {data-width=1 .input-panel}
 
 ```{r}
 # global holds the initial table state used to seed the rhandsontable widget.
@@ -629,8 +625,6 @@ global <- reactiveValues(df = df)
 
 rHandsontableOutput("dftbl1")
 
-checkboxInput("use_firth", "Use Firth's penalized regression", value = FALSE)
-
 # Optional genotype/allele labels shown on the model-comparison diagram
 # instead of the generic WT/Het/Hom. Blank fields fall back to the default.
 # Plain flex div (not fluidRow/column) — this panel is a flex item with
@@ -638,7 +632,7 @@ checkboxInput("use_firth", "Use Firth's penalized regression", value = FALSE)
 # that kind of parent instead of a bootstrap .container, which corrupts the
 # panel's layout and, via the resize observer, the plot below it.
 tags$div(
-  style = "display:flex; gap:8px;",
+  style = "display:flex; flex-direction:column; gap:8px;",
   tags$div(style = "flex:1;", textInput("lbl_wt",  "WT label",  value = "WT")),
   tags$div(style = "flex:1;", textInput("lbl_het", "Het label", value = "Het")),
   tags$div(style = "flex:1;", textInput("lbl_hom", "Hom label", value = "Hom"))
@@ -664,18 +658,25 @@ output$dftbl1 <- renderRHandsontable({
 })
 ```
 
-
-
-### Hardy-Weinberg equilibrium {data-width=4 .hwe-panel}
+### Analysis options {data-width=1 .analysis-panel}
 
 ```{r}
-# Radio buttons select between chi-square and Wigginton exact HWE tests.
-# The choice propagates to hwe_reactive, which drives both the table display
-# and the HWE section of the CSV download.
+# Regression method (Firth vs standard) and HWE test method, grouped
+# together since both control how results are computed.
+checkboxInput("use_firth", "Use Firth's penalized regression", value = FALSE)
+
 radioButtons("hwe_method",
-             label = "Test method",
+             label = "HWE test method",
              choices = c("Chi-square" = "chisq", "Exact (Wigginton 2005)" = "exact"),
              selected = "chisq")
+```
+
+### Hardy-Weinberg equilibrium {data-width=1 .hwe-panel}
+
+```{r}
+# hwe_method radio button lives in the Analysis options panel; its choice
+# propagates to hwe_reactive, which drives both the table display here and
+# the HWE section of the CSV download.
 
 # uiOutput placeholder; filled by output$hwe_table below.
 uiOutput("hwe_table")
