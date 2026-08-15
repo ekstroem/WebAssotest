@@ -631,12 +631,22 @@ rHandsontableOutput("dftbl1")
 # max-width:none/min-width:0, and fluidRow's negative-margin grid overflows
 # that kind of parent instead of a bootstrap .container, which corrupts the
 # panel's layout and, via the resize observer, the plot below it.
+# Built with raw tags rather than textInput() so the label sits beside
+# (not above) its box — textInput always stacks label above input.
 tags$div(
   style = "display:flex; flex-direction:column; gap:8px;",
-  tags$div(style = "flex:1;", textInput("lbl_wt",  "WT label",  value = "WT")),
-  tags$div(style = "flex:1;", textInput("lbl_het", "Het label", value = "Het")),
-  tags$div(style = "flex:1;", textInput("lbl_hom", "Hom label", value = "Hom"))
+  tags$div(style = "display:flex; align-items:center; gap:6px;",
+    tags$label("WT label",  `for` = "lbl_wt",  style = "margin:0; white-space:nowrap;"),
+    tags$input(id = "lbl_wt",  type = "text", class = "form-control", value = "WT")),
+  tags$div(style = "display:flex; align-items:center; gap:6px;",
+    tags$label("Het label", `for` = "lbl_het", style = "margin:0; white-space:nowrap;"),
+    tags$input(id = "lbl_het", type = "text", class = "form-control", value = "Het")),
+  tags$div(style = "display:flex; align-items:center; gap:6px;",
+    tags$label("Hom label", `for` = "lbl_hom", style = "margin:0; white-space:nowrap;"),
+    tags$input(id = "lbl_hom", type = "text", class = "form-control", value = "Hom"))
 )
+
+uiOutput("label_warning")
 
 # Genotype labels used by gtm() for plot text; blank entries fall back to
 # the WT/Het/Hom default so the diagram never shows an empty label.
@@ -644,6 +654,15 @@ flev_labels <- reactive({
   lbl <- c(input$lbl_wt, input$lbl_het, input$lbl_hom)
   dflt <- c("WT", "Het", "Hom")
   ifelse(is.na(lbl) | trimws(lbl) == "", dflt, trimws(lbl))
+})
+
+# Warn (non-blocking) when two or three resolved labels collide — the
+# diagram would otherwise show an ambiguous contrast like "OR(Mut vs Mut)".
+output$label_warning <- renderUI({
+  lbl <- flev_labels()
+  if (anyDuplicated(tolower(lbl)) == 0) return(NULL)
+  tags$p(class = "text-danger", style = "margin-top:4px; margin-bottom:0;",
+         "Genotype labels must be unique — duplicate labels will be confusing on the diagram.")
 })
 
 # Render the editable 2x3 genotype count table.
