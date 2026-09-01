@@ -586,9 +586,13 @@ gtm <- function(ca, co,
 }
 
 
-# Reads and rounds the edited rhandsontable
+# Reads the edited rhandsontable and coerces to non-negative integers.
+# Server-side backstop for hot_validate_numeric(min=0) — belt and braces
+# in case a value reaches here without going through client-side validation.
 modified_table <- reactive({
-  round(hot_to_r(req(input$dftbl1)))
+  tbl <- hot_to_r(req(input$dftbl1))
+  tbl[] <- lapply(tbl, function(x) as.integer(pmax(0, round(x))))
+  tbl
 })
 
 # Extracts ca/co integer vectors from the table rows
@@ -837,13 +841,28 @@ output$result_plot <- renderPlot({
 }, res = 96)
 
 # Compact AIC comparison table — lower AIC indicates better relative fit.
-tableOutput("aic_table")
-output$aic_table <- renderTable({
+# Built with raw tags (like the HWE table above) rather than renderTable so
+# the best-fitting (lowest-AIC) row can be highlighted.
+uiOutput("aic_table")
+output$aic_table <- renderUI({
   req(model_summary())
-  df <- model_summary()[, c("Model", "AIC")]
-  df$AIC <- formatC(df$AIC, format = "f", digits = 1)
-  df
-}, striped = TRUE, width = "300px")
+  df   <- model_summary()[, c("Model", "AIC")]
+  best <- which.min(df$AIC)   # ignores NA automatically; first row wins on ties
+  rows <- lapply(seq_len(nrow(df)), function(i) {
+    hl <- i == best
+    tags$tr(
+      style = if (hl) "font-weight:bold; background-color:#c8e6c9;" else NULL,
+      tags$td(df$Model[i]),
+      tags$td(formatC(df$AIC[i], format = "f", digits = 1))
+    )
+  })
+  tags$table(
+    class = "table table-sm table-bordered",
+    style = "width:300px;",
+    tags$thead(tags$tr(tags$th("Model"), tags$th("AIC"))),
+    tags$tbody(rows)
+  )
+})
 ```
 
 
