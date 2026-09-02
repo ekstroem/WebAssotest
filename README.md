@@ -12,8 +12,10 @@ A live version of the tool is available at [ekstroem.com](https://ekstroem.com) 
 - Simultaneous fitting of four genetic models: **dominant**, **recessive**, **co-dominant**, and **genotype**
 - Optional **Firth's penalized logistic regression** (via `logistf`) for robust handling of complete separation
 - Visual model comparison diagram with likelihood-ratio test statistics on each path; line width indicates which model transitions are statistically compatible with the data (p ≥ 0.05)
-- Model-fit (AIC) comparison table shown alongside the diagram, covering all five models
+- Model-fit (AIC) comparison table shown alongside the diagram, covering all five models, with the best-fitting (lowest AIC) model highlighted
 - Result panel heading shows which regression method (standard logistic vs. Firth's) produced the current output
+- Customizable genotype labels (defaults to WT/Het/Hom) shown on the diagram, with a warning if two labels collide
+- Analysis options (Firth's regression toggle, HWE test method) grouped in their own panel next to the data-entry table
 - Hardy-Weinberg equilibrium test for cases, controls, and both combined — reports minor allele frequency (MAF) and choice of **chi-square** or **exact test** (Wigginton et al., 2005)
 - Automatic fallback to Fisher's exact test for odds ratios when cells contain zeros (standard mode only)
 - Screenshot export and CSV download of results
