@@ -148,7 +148,7 @@ $(document).ready(function() {
 #
 # Pure functions defined below (before reactives so they are available
 # to all outputs): SNPHWE, check_data_validity, hwe_pvalues, maf,
-# ci.mat, gtm.
+# ci.mat, fmt_p, p_lab, fmt_ci, fisher_or, allelic_tests, gtm.
 # --------------------------------------------------------------------
 
 library("flexdashboard")
@@ -163,9 +163,6 @@ df <- data.frame(
   Hom = c(30L, 30L)
 )
 rownames(df) <- c("Cases", "Controls")
-
-
-
 
 # --------------------------------------------------------------------
 # SNPHWE(obs_hets, obs_hom1, obs_hom2)
@@ -228,7 +225,8 @@ SNPHWE <- function(obs_hets, obs_hom1, obs_hom2) {
   }
 
   target <- probs[obs_hets + 1]
-  p <- min(1.0, sum(probs[probs <= target]) / mysum)
+  # Relative tolerance so floating-point ties with the observed table count
+  p <- min(1.0, sum(probs[probs <= target * (1 + 1e-7)]) / mysum)
   return(p)
 }
 
@@ -269,9 +267,11 @@ hwe_pvalues <- function(ca, co, method = "chisq") {
   # Chi-square HWE test for a single group x = c(WT, Het, Hom)
   hwe_chisq <- function(x) {
     f   <- (2 * x[1] + x[2]) / (2 * sum(x))   # reference allele frequency
+    # Monomorphic group: expected counts are zero, HWE holds trivially
+    if (f %in% c(0, 1)) return(list(stat = 0, p = 1))
     e   <- c(f^2, 2 * f * (1 - f), (1 - f)^2) * sum(x)
     tst <- sum((x - e)^2 / e)
-    p   <- 1 - pchisq(tst, 1)
+    p   <- pchisq(tst, 1, lower.tail = FALSE)
     list(stat = tst, p = p)
   }
 
@@ -280,7 +280,7 @@ hwe_pvalues <- function(ca, co, method = "chisq") {
     p.co  <- SNPHWE(co[2], co[1], co[3])
     # Combined: sum of -2*log(p) ~ chi-sq(4) (Fisher's method)
     t.2   <- -2 * (log(p.ca) + log(p.co))
-    p.2   <- 1 - pchisq(t.2, 4)
+    p.2   <- pchisq(t.2, 4, lower.tail = FALSE)
     t.ca  <- NA
     t.co  <- NA
   } else {
@@ -289,7 +289,7 @@ hwe_pvalues <- function(ca, co, method = "chisq") {
     t.ca  <- r.ca$stat;  p.ca <- r.ca$p
     t.co  <- r.co$stat;  p.co <- r.co$p
     t.2   <- t.ca + t.co
-    p.2   <- 1 - pchisq(t.2, 2)
+    p.2   <- pchisq(t.2, 2, lower.tail = FALSE)
   }
 
   list(t.ca = t.ca, p.ca = p.ca,
@@ -329,6 +329,72 @@ ci.mat <- function(alpha = 0.05) {
 
 
 # --------------------------------------------------------------------
+# Formatting helpers.
+# fmt_p(p):   p-value as text; small values in scientific notation
+#             ("1.2e-10") instead of "0.000", floored at "<1e-300".
+# p_lab(p):   "p=0.123" or "p<1e-300" for plot labels.
+# fmt_ci(x):  x = c(estimate, lower, upper) -> "1.23 ( 0.90 ; 1.70 )".
+# --------------------------------------------------------------------
+fmt_p <- function(p) format.pval(p, digits = 3, eps = 1e-300)
+
+p_lab <- function(p) {
+  s <- fmt_p(p)
+  if (startsWith(s, "<")) paste0("p", s) else paste0("p=", s)
+}
+
+fmt_ci <- function(x) {
+  f <- formatC(x, format = "f", digits = 2)
+  paste(f[1], "(", f[2], ";", f[3], ")")
+}
+
+
+# --------------------------------------------------------------------
+# fisher_or(tab)
+# tab: 2x2 matrix, rows Controls/Cases, columns reference/exposed.
+# Returns c(estimate, lower, upper) from Fisher's exact test — the
+# conditional MLE odds ratio, used when a cell is zero.
+# --------------------------------------------------------------------
+fisher_or <- function(tab) {
+  ft <- fisher.test(tab)
+  c(ft[["estimate"]], ft[["conf.int"]])
+}
+
+
+# --------------------------------------------------------------------
+# allelic_tests(ca, co)
+# ca, co: integer vectors of length 3 (WT, Het, Hom counts).
+# Returns a data frame with two 1-df tests:
+#   Cochran-Armitage trend test (prop.trend.test, scores 1/2/3) —
+#     valid without HWE.
+#   Allelic test — 2x2 chi-square on allele counts, with the allelic
+#     OR (Het/Hom allele vs WT allele) and Wald 95% CI; Fisher's exact
+#     OR/CI when an allele cell is zero. Assumes HWE.
+# --------------------------------------------------------------------
+allelic_tests <- function(ca, co) {
+  trend  <- suppressWarnings(prop.trend.test(ca, ca + co))
+  alle   <- function(x) c(2 * x[1] + x[2], x[2] + 2 * x[3])
+  tab    <- rbind(alle(co), alle(ca))   # rows Controls/Cases, cols ref/alt allele
+  # Allele columns can be empty (monomorphic sample) — no test then
+  chi    <- if (all(colSums(tab) > 0))
+    suppressWarnings(chisq.test(tab, correct = FALSE)) else list(statistic = NA, p.value = NA)
+  or <- if (any(tab == 0)) fisher_or(tab) else {
+    lor <- log(tab[1, 1] * tab[2, 2] / (tab[1, 2] * tab[2, 1]))
+    se  <- sqrt(sum(1 / tab))
+    exp(lor + c(0, -1, 1) * qnorm(0.975) * se)
+  }
+  data.frame(
+    Test     = c("Trend (Cochran-Armitage)", "Allelic"),
+    df       = c(1, 1),
+    Chisq    = c(unname(trend$statistic), unname(chi$statistic)),
+    p_value  = c(trend$p.value, chi$p.value),
+    OR       = c(NA, or[1]),
+    CI_lower = c(NA, or[2]),
+    CI_upper = c(NA, or[3])
+  )
+}
+
+
+# --------------------------------------------------------------------
 # gtm(ca, co, flev, fnam, main, firth)
 # ca, co: integer vectors of length 3 (WT, Het, Hom counts).
 # flev: genotype level labels. fnam/main: plot title.
@@ -340,7 +406,7 @@ ci.mat <- function(alpha = 0.05) {
 #   nul: intercept only (no association)
 #   gen: factor(WT/Het/Hom) — genotype model, 2 df
 #   dom: factor(WT vs Het+Hom) — dominant model, 1 df
-#   cod: linear score 1/2/3 — co-dominant/additive model, 1 df
+#   cod: linear score 0/1/2 — additive (log-additive) model, 1 df
 #   rec: factor(WT+Het vs Hom) — recessive model, 1 df
 #
 # Draws a model-comparison diagram using base graphics. Lines connect
@@ -350,7 +416,8 @@ ci.mat <- function(alpha = 0.05) {
 # When any cell in a contrast is zero, Fisher's exact test replaces
 # the logistic-regression OR and CI for that contrast.
 #
-# Returns a summary data frame invisibly (used by the CSV download).
+# Returns invisibly list(models, tests): per-contrast ORs/CIs with AIC,
+# and all likelihood-ratio tests (used by the AIC table and CSV download).
 # --------------------------------------------------------------------
 
 gtm <- function(ca, co,
@@ -396,11 +463,9 @@ gtm <- function(ca, co,
     cod    <- logistf(y ~ xa)        # nested in gen_ca
     rec    <- logistf(y ~ x2)        # nested in gen_dr
     
-    # Small helper function to extract the test statistic and p value
+    # Extract the test statistic and p-value. Statistics within rounding
+    # error of zero are set to 0 so formatC does not print "-0.000".
     plr  <- function(a) {
-      # formatC has an annoying rounding bnit that is set to negative when rounding numbers very close to zero
-      # Hence the next line to prevent the negative sign in th test statistics
-      
       if (a$chisq<0.0000001)
         a$chisq <- 0
       list(chisq = a$chisq, p = a$pval)
@@ -458,91 +523,65 @@ gtm <- function(ca, co,
   if (!firth) {
     gt1 <- rbind(co, ca)[, -3]   # WT vs Het
     gt2 <- rbind(co, ca)[, -2]   # WT vs Hom
-    if (any(gt1 == 0)) {
-      ft <- fisher.test(gt1)
-      OR.g[1, ] <- c(ft[["estimate"]], ft[["conf.int"]])
-    }
-    if (any(gt2 == 0)) {
-      ft <- fisher.test(gt2)
-      OR.g[2, ] <- c(ft[["estimate"]], ft[["conf.int"]])
-    }
+    if (any(gt1 == 0)) OR.g[1, ] <- fisher_or(gt1)
+    if (any(gt2 == 0)) OR.g[2, ] <- fisher_or(gt2)
     dot <- rbind(co, ca) %*% cbind(c(1, 0, 0), c(0, 1, 1))  # WT vs Het+Hom
-    if (any(dot == 0)) {
-      ft <- fisher.test(dot)
-      OR.d[1, ] <- c(ft[["estimate"]], ft[["conf.int"]])
-    }
+    if (any(dot == 0)) OR.d[1, ] <- fisher_or(dot)
     if (sum(wh <- (ca + co > 0)) < 3) {
       cot <- rbind(co, ca)[, wh]
       if (any(cot == 0)) {
-        ft <- fisher.test(cot)
-        OR.c[1, ] <- c(ft[["estimate"]], ft[["conf.int"]])
+        OR.c[1, ] <- fisher_or(cot)
         # When the Het column is missing, the additive OR is per 2 copies;
         # take the square root to recover the per-allele OR.
         if (!wh[2]) OR.c <- sqrt(OR.c)
       }
     }
     rct <- rbind(co, ca) %*% cbind(c(1, 1, 0), c(0, 0, 1))  # WT+Het vs Hom
-    if (any(rct == 0)) {
-      ft <- fisher.test(rct)
-      OR.r[1, ] <- c(ft[["estimate"]], ft[["conf.int"]])
-    }
+    if (any(rct == 0)) OR.r[1, ] <- fisher_or(rct)
   }
-  
+
   # Genotype model — top centre
   text(50, 98, "Genotype model", font = 2)
-  text(50, 95, paste("OR(", flev[2], "vs.", flev[1], "):",
-                     formatC(OR.g[1, 1], format = "f", digits = 2),
-                     "(", formatC(OR.g[1, 2], format = "f", digits = 2),
-                     ";", formatC(OR.g[1, 3], format = "f", digits = 2), ")"))
-  text(50, 92, paste("OR(", flev[3], "vs.", flev[1], "):",
-                     formatC(OR.g[2, 1], format = "f", digits = 2),
-                     "(", formatC(OR.g[2, 2], format = "f", digits = 2),
-                     ";", formatC(OR.g[2, 3], format = "f", digits = 2), ")"))
+  text(50, 95, paste("OR(", flev[2], "vs.", flev[1], "):", fmt_ci(OR.g[1, ])))
+  text(50, 92, paste("OR(", flev[3], "vs.", flev[1], "):", fmt_ci(OR.g[2, ])))
 
   # Dominant model — left
   text(0, 53, "Dominant", adj = c(0, 0.5), font = 2)
   text(0, 50, paste("OR(", dlev[2], "vs.", dlev[1], "):"), adj = c(0, 0.5))
-  text(0, 47, paste(formatC(OR.d[1, 1], format = "f", digits = 2),
-                    "(", formatC(OR.d[1, 2], format = "f", digits = 2),
-                    ";", formatC(OR.d[1, 3], format = "f", digits = 2), ")"),
-       adj = c(0, 0.5))
+  text(0, 47, fmt_ci(OR.d[1, ]), adj = c(0, 0.5))
 
-  # Co-dominant model — centre
-  text(50, 53, "Co-dominant", adj = c(0.5, 0.5), font = 2)
+  # Additive (log-additive) model — centre
+  text(50, 53, "Additive", adj = c(0.5, 0.5), font = 2)
   text(50, 50, paste("OR(", flev[3], "vs.", flev[2], ")=",
                      "OR(", flev[2], "vs.", flev[1], "):"), adj = c(0.5, 0.5))
-  text(50, 47, paste(formatC(OR.c[1, 1], format = "f", digits = 2),
-                     "(", formatC(OR.c[1, 2], format = "f", digits = 2),
-                     ";", formatC(OR.c[1, 3], format = "f", digits = 2), ")"),
-       adj = c(0.5, 0.5))
+  text(50, 47, fmt_ci(OR.c[1, ]), adj = c(0.5, 0.5))
 
   # Recessive model — right
   text(100, 53, "Recessive", adj = c(1, 0.5), font = 2)
   text(100, 50, paste("OR(", rlev[3], "vs.", rlev[1], "):"), adj = c(1, 0.5))
-  text(100, 47, paste(formatC(OR.r[1, 1], format = "f", digits = 2),
-                      "(", formatC(OR.r[1, 2], format = "f", digits = 2),
-                      ";", formatC(OR.r[1, 3], format = "f", digits = 2), ")"),
-       adj = c(1, 0.5))
+  text(100, 47, fmt_ci(OR.r[1, ]), adj = c(1, 0.5))
 
   # Null model — bottom centre
   text(50, 8, "Null model", adj = c(0.5, 0.5), font = 2)
   text(50, 5, "OR = 1", adj = c(0.5, 0.5))
   text(50, 2, substitute(chi^2 * rest,
-    list(rest = paste("(2)=", formatC(r.gn$chisq, format = "f", digits = 3),
-                      ", p=", formatC(r.gn$p,     format = "f", digits = 3)))),
+    list(rest = paste0("(2)=", formatC(r.gn$chisq, format = "f", digits = 3),
+                       ", ", p_lab(r.gn$p)))),
     adj = c(0.5, 0.5))
 
-  
   # Connecting lines: lwd=8 when p >= 0.05 (simpler model not rejected),
   # lwd=2 when rejected. Thick lines indicate compatible simplifications.
   lwd_for <- function(p) if (is.na(p) || p >= 0.05) 8 else 2
 
   lines(c(40, 10), c(90, 55), lwd = lwd_for(r.gd$p))  # Genotype  -> Dominant
   lines(c(10, 40), c(45, 10), lwd = lwd_for(r.dn$p))  # Dominant  -> Null
-  lines(c(50, 50), c(10, 45), lwd = lwd_for(r.cn$p))  # Null      -> Co-dominant
-  lines(c(50, 50), c(55, 90), lwd = lwd_for(r.gc$p))  # Co-dominant -> Genotype
+  lines(c(50, 50), c(10, 45), lwd = lwd_for(r.cn$p))  # Null      -> Additive
+  lines(c(50, 50), c(55, 90), lwd = lwd_for(r.gc$p))  # Additive  -> Genotype
   lines(c(60, 90), c(90, 55), lwd = lwd_for(r.gr$p))  # Genotype  -> Recessive
   lines(c(90, 60), c(45, 10), lwd = lwd_for(r.rn$p))  # Recessive -> Null
+
+  legend("bottomleft", lwd = c(8, 2), bty = "n",
+         legend = c("Not rejected (p ≥ 0.05)", "Rejected (p < 0.05)"))
 
   rect(0, 25, 100, 30, col = "white", border = "white")
   rect(0, 70, 100, 75, col = "white", border = "white")
@@ -555,34 +594,44 @@ gtm <- function(ca, co,
     if (is.na(r$p) && !is.na(r$chisq) && r$chisq < 0.000001) r$p <- 1
     r
   })
-  
-  # Set the positions of the test statistics on th elines
+
+  # Set the positions of the test statistics on the lines
   xt <- c(30, 30, 50, 50, 70, 70)
   yt <- c(72.5, 27.5, 27.5, 72.5, 72.5, 27.5)
   at <- c(0.9, 0.9, 0.5, 0.5, 0.1, 0.1)
 
-
   for (i in 1:6)
     text(xt[i], yt[i],
          substitute(chi^2 == rest,
-           list(rest = paste(formatC(results_list[[i]]$chisq, format = "f", digits = 3),
-                             ", p=",
-                             formatC(results_list[[i]]$p,     format = "f", digits = 3)))),
+           list(rest = paste0(formatC(results_list[[i]]$chisq, format = "f", digits = 3),
+                              ", ", p_lab(results_list[[i]]$p)))),
          adj = c(at[i], 0.5))
 
-  # Return a tidy summary data frame for download.
-  # Null row included so AIC values span all five models for comparison.
-  invisible(
-    data.frame(
-      Model    = c("Null", "Dominant", "Co-dominant", "Recessive", "Genotype"),
-      OR       = c(NA,        OR.d[1,1], OR.c[1,1], OR.r[1,1], NA),
-      CI_lower = c(NA,        OR.d[1,2], OR.c[1,2], OR.r[1,2], NA),
-      CI_upper = c(NA,        OR.d[1,3], OR.c[1,3], OR.r[1,3], NA),
-      Chisq    = c(NA,        r.dn$chisq, r.cn$chisq, r.rn$chisq, r.gn$chisq),
-      p_value  = c(NA,        r.dn$p,     r.cn$p,     r.rn$p,     r.gn$p),
-      AIC      = aic_vals
+  # Return tidy summaries for the AIC table and the CSV download.
+  # models: one row per OR contrast (Genotype has two); AIC per model.
+  # tests:  every likelihood-ratio test shown on the diagram.
+  or_rows <- rbind(rep(NA, 3), OR.d[1, ], OR.c[1, ], OR.r[1, ], OR.g[1, ], OR.g[2, ])
+  invisible(list(
+    models = data.frame(
+      Model    = c("Null", "Dominant", "Additive", "Recessive", "Genotype", "Genotype"),
+      Contrast = c(NA, paste(dlev[2], "vs", dlev[1]), "per allele copy",
+                   paste(rlev[3], "vs", rlev[1]),
+                   paste(flev[2], "vs", flev[1]), paste(flev[3], "vs", flev[1])),
+      OR       = or_rows[, 1],
+      CI_lower = or_rows[, 2],
+      CI_upper = or_rows[, 3],
+      AIC      = aic_vals[c(1:5, 5)]
+    ),
+    tests = data.frame(
+      Comparison = c("Dominant vs Null", "Additive vs Null", "Recessive vs Null",
+                     "Genotype vs Null", "Genotype vs Dominant",
+                     "Genotype vs Additive", "Genotype vs Recessive"),
+      df      = c(1, 1, 1, 2, 1, 1, 1),
+      Chisq   = c(r.dn$chisq, r.cn$chisq, r.rn$chisq, r.gn$chisq,
+                  r.gd$chisq, r.gc$chisq, r.gr$chisq),
+      p_value = c(r.dn$p, r.cn$p, r.rn$p, r.gn$p, r.gd$p, r.gc$p, r.gr$p)
     )
-  )
+  ))
 }
 
 
@@ -622,12 +671,52 @@ Row {data-height=320}
 ### Data input {data-width=1 .input-panel}
 
 ```{r}
-# global holds the initial table state used to seed the rhandsontable widget.
-# After first render, all edits are captured via input$dftbl1 (hot_to_r);
-# global is never mutated.
-global <- reactiveValues(df = df)
+# global holds the table state used to seed the rhandsontable widget.
+# Edits are captured via input$dftbl1 (hot_to_r); global is only replaced
+# by the Flip/Reset buttons. nonce forces a re-render even when the new
+# df is identical to the old one (e.g. Reset after editing the table).
+global <- reactiveValues(df = df, nonce = 0)
+set_table <- function(new_df) {
+  global$df    <- new_df
+  global$nonce <- isolate(global$nonce) + 1
+}
 
 rHandsontableOutput("dftbl1")
+uiOutput("row_pct")
+
+tags$div(style = "display:flex; gap:6px; margin:6px 0;",
+  actionButton("flip", "Flip allele coding", class = "btn-sm",
+               title = "Swap WT and Hom columns (and their labels)"),
+  actionButton("reset", "Reset", class = "btn-sm",
+               title = "Restore the default table and labels"))
+
+# Row percentages per genotype, so case/control distributions are easy
+# to compare at a glance.
+output$row_pct <- renderUI({
+  d   <- ca_co()
+  pct <- function(x) if (sum(x) == 0) "\u2014" else
+    paste0(round(100 * x / sum(x)), "%", collapse = " / ")
+  tags$small(class = "text-muted",
+    tags$div("Cases: ",    pct(d$ca)),
+    tags$div("Controls: ", pct(d$co)))
+})
+
+# Flip: reverse genotype order so the other allele is the reference.
+# Dominant/recessive swap meaning, so labels are swapped too.
+observeEvent(input$flip, {
+  tbl <- modified_table()[, 3:1]
+  names(tbl) <- c("WT", "Het", "Hom")
+  set_table(tbl)
+  updateTextInput(session, "lbl_wt",  value = input$lbl_hom)
+  updateTextInput(session, "lbl_hom", value = input$lbl_wt)
+})
+
+observeEvent(input$reset, {
+  set_table(df)
+  updateTextInput(session, "lbl_wt",  value = "WT")
+  updateTextInput(session, "lbl_het", value = "Het")
+  updateTextInput(session, "lbl_hom", value = "Hom")
+})
 
 # Optional genotype/allele labels shown on the model-comparison diagram
 # instead of the generic WT/Het/Hom. Blank fields fall back to the default.
@@ -674,7 +763,8 @@ output$label_warning <- renderUI({
 # Numeric validation enforces non-negative values and prevents non-numeric input.
 # rowHeaderWidth = 80 ensures "Cases" / "Controls" labels are not clipped.
 output$dftbl1 <- renderRHandsontable({
-  rhandsontable(global$df, selectCallback = TRUE, readOnly = FALSE, rowHeaderWidth = 80) %>%
+  global$nonce
+  rhandsontable(global$df, readOnly = FALSE, rowHeaderWidth = 80) %>%
     hot_context_menu(allowRowEdit = FALSE, allowColEdit = FALSE) %>%
     hot_validate_numeric(col = c("WT", "Het", "Hom"), min = 0, allowInvalid = FALSE) %>%
     hot_cols(colWidths = 45)
@@ -724,15 +814,15 @@ output$hwe_table <- renderUI({
     c("Cases",
       fmt_maf(maf(d$ca)),
       if (is.na(hwe$t.ca)) "\u2014" else formatC(hwe$t.ca, format = "f", digits = 3),
-      formatC(hwe$p.ca, format = "f", digits = 3)),
+      fmt_p(hwe$p.ca)),
     c("Controls",
       fmt_maf(maf(d$co)),
       if (is.na(hwe$t.co)) "\u2014" else formatC(hwe$t.co, format = "f", digits = 3),
-      formatC(hwe$p.co, format = "f", digits = 3)),
+      fmt_p(hwe$p.co)),
     c("Both",
       fmt_maf(maf(d$ca + d$co)),
       formatC(hwe$t.2, format = "f", digits = 3),
-      formatC(hwe$p.2, format = "f", digits = 3))
+      fmt_p(hwe$p.2))
   )
   tagList(
     tags$b(method_label),
@@ -757,48 +847,62 @@ tags$div(
                    label    = " Take a screenshot",
                    filename = "webassotest",
                    download = TRUE),
+  downloadButton("download_plot",
+                 label = " Download diagram (.pdf)"),
   downloadButton("download_results",
                  label = " Download results (.csv)")
 )
 
-# CSV download handler — produces a single file with two sections:
+# Vector PDF of the model-comparison diagram for publications.
+output$download_plot <- downloadHandler(
+  filename = function() paste0("webassotest_diagram_", Sys.Date(), ".pdf"),
+  content  = function(file) {
+    d <- ca_co()
+    req(check_data_validity(d$ca, d$co)$valid)
+    cairo_pdf(file, width = 11, height = 9)   # cairo keeps the \u2265 glyph
+    on.exit(dev.off())
+    gtm(d$ca, d$co, firth = input$use_firth, flev = flev_labels())
+  }
+)
+
+# CSV download handler — one file, stacked sections with a shared set of
+# columns (cells not relevant to a section are NA):
 #
-#   Section = "Model results":
-#     One row per model (Null, Dominant, Co-dominant, Recessive, Genotype).
-#     Columns: Model, OR, CI_lower, CI_upper, Chisq (vs. null), p_value, AIC.
-#     OR/CI are NA for Null and Genotype (no single-parameter contrast).
-#     Chisq/p_value for each model is its LRT against the null.
-#     AIC spans all five models to enable direct model comparison.
+#   Section = "Model":          one row per OR contrast (Genotype has two),
+#                               with Wald/Fisher CI and model AIC.
+#   Section = "LRT":            every likelihood-ratio test on the diagram.
+#   Section = "Allelic tests":  Cochran-Armitage trend and allelic test.
+#   Section = "HWE":            Cases, Controls, Both; selected HWE method.
 #
-#   Section = "HWE test":
-#     One row per group (Cases, Controls, Both).
-#     Non-HWE columns are NA; HWE stat and p-value use the currently
-#     selected method (chi-square or exact).
-#
-# gtm() is called for its invisible return value (model summary data frame);
-# the resulting plot is discarded since we are inside a download handler,
-# not a render context.
+# gtm() is called for its invisible return value; the plot it draws is
+# discarded since we are inside a download handler, not a render context.
 output$download_results <- downloadHandler(
   filename = function() paste0("webassotest_results_", Sys.Date(), ".csv"),
   content  = function(file) {
     d     <- ca_co()
     ca    <- d$ca
     co    <- d$co
-    check <- check_data_validity(ca, co)
-    req(check$valid)
+    req(check_data_validity(ca, co)$valid)
     hwe <- hwe_pvalues(ca, co, method = input$hwe_method)
+    png(tempfile())   # discard the plot gtm() draws
     res <- gtm(ca, co, firth = input$use_firth, flev = flev_labels())
-    hwe_df <- data.frame(
-      Group    = c("Cases", "Controls", "Both"),
-      HWE_stat = c(hwe$t.ca, hwe$t.co, hwe$t.2),
-      HWE_p    = c(hwe$p.ca, hwe$p.co, hwe$p.2)
+    dev.off()
+    al  <- allelic_tests(ca, co)
+    sections <- list(
+      cbind(Section = "Model", res$models),
+      cbind(Section = "LRT", setNames(res$tests, c("Contrast", "df", "Chisq", "p_value"))),
+      cbind(Section = "Allelic tests", setNames(al, c("Contrast", names(al)[-1]))),
+      data.frame(Section  = "HWE",
+                 Contrast = c("Cases", "Controls", "Both"),
+                 Chisq    = c(hwe$t.ca, hwe$t.co, hwe$t.2),
+                 p_value  = c(hwe$p.ca, hwe$p.co, hwe$p.2))
     )
-    write.csv(rbind(
-      cbind(Section = "Model results", res),
-      cbind(Section = "HWE test", setNames(
-        data.frame(hwe_df$Group, NA, NA, NA, hwe_df$HWE_stat, hwe_df$HWE_p, NA),
-        names(res)))
-    ), file, row.names = FALSE)
+    cols <- unique(unlist(lapply(sections, names)))
+    out  <- do.call(rbind, lapply(sections, function(x) {
+      x[setdiff(cols, names(x))] <- NA
+      x[cols]
+    }))
+    write.csv(out, file, row.names = FALSE)
   }
 )
 ```
@@ -840,27 +944,40 @@ output$result_plot <- renderPlot({
   model_summary(gtm(ca, co, firth = input$use_firth, flev = flev_labels()))
 }, res = 96)
 
-# Compact AIC comparison table — lower AIC indicates better relative fit.
-# Built with raw tags (like the HWE table above) rather than renderTable so
-# the best-fitting (lowest-AIC) row can be highlighted.
-uiOutput("aic_table")
-output$aic_table <- renderUI({
+# Compact AIC comparison table — lower AIC indicates better relative fit —
+# shown beside the trend/allelic tests. Built with raw tags (like the HWE
+# table above) rather than renderTable so the lowest-AIC row can be
+# highlighted.
+uiOutput("result_tables")
+output$result_tables <- renderUI({
   req(model_summary())
-  df   <- model_summary()[, c("Model", "AIC")]
+  df   <- unique(model_summary()$models[, c("Model", "AIC")])
   best <- which.min(df$AIC)   # ignores NA automatically; first row wins on ties
-  rows <- lapply(seq_len(nrow(df)), function(i) {
-    hl <- i == best
+  aic_rows <- lapply(seq_len(nrow(df)), function(i) {
     tags$tr(
-      style = if (hl) "font-weight:bold; background-color:#c8e6c9;" else NULL,
+      style = if (i == best) "font-weight:bold; background-color:#c8e6c9;" else NULL,
       tags$td(df$Model[i]),
       tags$td(formatC(df$AIC[i], format = "f", digits = 1))
     )
   })
-  tags$table(
-    class = "table table-sm table-bordered",
-    style = "width:300px;",
-    tags$thead(tags$tr(tags$th("Model"), tags$th("AIC"))),
-    tags$tbody(rows)
+  d  <- ca_co()
+  al <- allelic_tests(d$ca, d$co)
+  al_rows <- lapply(seq_len(nrow(al)), function(i) tags$tr(
+    tags$td(al$Test[i]),
+    tags$td(formatC(al$Chisq[i], format = "f", digits = 3)),
+    tags$td(fmt_p(al$p_value[i])),
+    tags$td(if (is.na(al$OR[i])) "\u2014" else fmt_ci(unlist(al[i, c("OR", "CI_lower", "CI_upper")])))
+  ))
+  tags$div(style = "display:flex; flex-wrap:wrap; gap:24px; align-items:flex-start;",
+    tags$table(
+      class = "table table-sm table-bordered", style = "width:300px;",
+      tags$thead(tags$tr(tags$th("Model"), tags$th("AIC"))),
+      tags$tbody(aic_rows)),
+    tags$table(
+      class = "table table-sm table-bordered", style = "width:auto;",
+      tags$thead(tags$tr(tags$th("1-df test"), tags$th("\u03c7\u00b2"),
+                         tags$th("p"), tags$th("Allelic OR (95% CI)"))),
+      tags$tbody(al_rows))
   )
 })
 ```
@@ -874,13 +991,15 @@ Column {data-width=600}
 
 ### About Web-Assotest
 
-Web-Assotest is a browser-based tool for analysing the association between a genetic variant and a binary outcome (cases vs. controls) using a 3×2 genotype count table. It fits four standard genetic models — **dominant**, **recessive**, **co-dominant**, and **genotype** — and displays odds ratios with 95% confidence intervals and likelihood-ratio test statistics for each, allowing the user to assess which models are consistent with the data.
+Web-Assotest is a browser-based tool for analysing the association between a genetic variant and a binary outcome (cases vs. controls) using a 3×2 genotype count table. It fits four standard genetic models — **dominant**, **recessive**, **additive** (log-additive: the same OR per allele copy), and **genotype** — and displays odds ratios with 95% confidence intervals and likelihood-ratio test statistics for each, allowing the user to assess which models are consistent with the data.
 
 The tool also tests for departure from **Hardy-Weinberg equilibrium (HWE)** in cases, controls, and both combined, using either a chi-square test or the exact test of Wigginton, Cutler & Abecasis (2005).
 
 For an overview and explanation of the models, see the [course slides](https://ekstroem.com/download/assotestslides.pdf) on case-control studies and genetic association analysis. Web-Assotest is [widely used in scientific publications](http://scholar.google.com/scholar?q=web-assotest).
 
 Web-Assotest uses [R](http://www.r-project.org/) for all computations. See the [R Primer book](http://www.rprimer.dk/) for an introduction to statistical analysis in R.
+
+Two 1-df tests are also reported: the **Cochran-Armitage trend test** and the **allelic test** (allele counts in a 2×2 table, with the allelic OR). The allelic test assumes HWE; the trend test does not. **Flip allele coding** swaps which homozygote is the reference, which swaps the meaning of the dominant and recessive models.
 
 **Note:** cells with zero counts are handled using Fisher's exact test for the affected contrasts. Take care when many cells contain zeros.
 

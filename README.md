@@ -9,7 +9,7 @@ A live version of the tool is available at [ekstroem.com](https://ekstroem.com) 
 ## Features
 
 - Interactive 3×2 genotype count table (WT / Het / Hom × Cases / Controls)
-- Simultaneous fitting of four genetic models: **dominant**, **recessive**, **co-dominant**, and **genotype**
+- Simultaneous fitting of four genetic models: **dominant**, **recessive**, **additive**, and **genotype**
 - Optional **Firth's penalized logistic regression** (via `logistf`) for robust handling of complete separation
 - Visual model comparison diagram with likelihood-ratio test statistics on each path; line width indicates which model transitions are statistically compatible with the data (p ≥ 0.05)
 - Model-fit (AIC) comparison table shown alongside the diagram, covering all five models, with the best-fitting (lowest AIC) model highlighted
@@ -18,7 +18,10 @@ A live version of the tool is available at [ekstroem.com](https://ekstroem.com) 
 - Analysis options (Firth's regression toggle, HWE test method) grouped in their own panel next to the data-entry table
 - Hardy-Weinberg equilibrium test for cases, controls, and both combined — reports minor allele frequency (MAF) and choice of **chi-square** or **exact test** (Wigginton et al., 2005)
 - Automatic fallback to Fisher's exact test for odds ratios when cells contain zeros (standard mode only)
-- Screenshot export and CSV download of results
+- Cochran-Armitage trend test and allelic test (with allelic OR) shown beside the AIC table
+- Flip allele coding (swap reference homozygote) and Reset buttons; row percentages under the data table
+- Small p-values shown in scientific notation rather than rounded to 0.000
+- Screenshot export, PDF download of the diagram, and CSV download of all results (ORs, every likelihood-ratio test, trend/allelic tests, HWE)
 - Fully browser-based; no software installation required for end users
 
 ---
@@ -31,7 +34,7 @@ The tool tests the following hierarchy of models, all fitted as logistic regress
 |---|---|
 | Genotype | Het vs. WT and Hom vs. WT (2 df) |
 | Dominant | Het+Hom vs. WT (1 df) |
-| Co-dominant | Multiplicative: equal OR per allele copy (1 df) |
+| Additive | Log-additive (multiplicative): equal OR per allele copy (1 df) |
 | Recessive | Hom vs. WT+Het (1 df) |
 | Null | No association (OR = 1) |
 

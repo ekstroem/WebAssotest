@@ -41,7 +41,7 @@ application [@rcoreteam2024; @chang2024shiny;
 @iannone2024flexdashboard], runs entirely in the browser once
 deployed, and requires no local software installation, scripting, or
 statistical training beyond entering the genotype counts into an
-editable table.
+editable table (see \autoref{fig:example}).
 
 Non-R-savvy users who do not want to run the application locally can run the application directly in a browser from this URL 
 `http://ekstroem.com:3838/webassotest/`.
