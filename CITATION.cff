@@ -1,0 +1,26 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it using the metadata from this file."
+type: software
+title: "Web-Assotest: a browser-based tool for genetic association analysis under multiple inheritance models"
+abstract: >-
+  Browser-based R/Shiny tool for analysing the association between a genetic
+  variant and a binary outcome from a 3x2 table of genotype counts. Fits the
+  null, dominant, additive, recessive and genotypic logistic-regression models
+  (optionally with Firth's penalized regression), reports trend and allelic
+  tests, and tests Hardy-Weinberg equilibrium.
+authors:
+  - family-names: "Ekstrøm"
+    given-names: "Claus Thorn"
+    orcid: "https://orcid.org/0000-0003-1191-373X"
+    affiliation: "Department of Public Health, Section of Biostatistics, University of Copenhagen, Denmark"
+version: "0.99"
+license: MIT
+repository-code: "https://github.com/ekstroem/WebAssotest"
+url: "http://ekstroem.com:3838/webassotest/"
+keywords:
+  - R
+  - Shiny
+  - genetics
+  - genetic epidemiology
+  - case-control studies
+  - Hardy-Weinberg equilibrium
