@@ -4,7 +4,7 @@ date: 'Page loaded: `r format(as.POSIXct(format(Sys.time())), "%b %d, %Y")`'
 output:
   flexdashboard::flex_dashboard:
     navbar:
-      - { title: "About", href: "#about", align: right, icon: glyphicon-info-sign}
+      - { title: "v0.99", align: right }
     orientation: rows
     vertical_layout: scroll
     social: menu
@@ -155,6 +155,10 @@ library("flexdashboard")
 library("rhandsontable")
 library("shinyscreenshot")
 library("logistf")
+
+# Application version, written to the CSV export.
+# Keep in sync with the "v0.99" navbar item in the YAML header.
+app_version <- "0.99"
 
 # Default genotype count table — rows: Cases/Controls, cols: WT/Het/Hom
 df <- data.frame(
@@ -383,7 +387,7 @@ allelic_tests <- function(ca, co) {
     exp(lor + c(0, -1, 1) * qnorm(0.975) * se)
   }
   data.frame(
-    Test     = c("Trend (Cochran-Armitage)", "Allelic"),
+    Test     = c("Cochran-Armitage", "Allelic"),
     df       = c(1, 1),
     Chisq    = c(unname(trend$statistic), unname(chi$statistic)),
     p_value  = c(trend$p.value, chi$p.value),
@@ -866,8 +870,12 @@ output$download_plot <- downloadHandler(
 )
 
 # CSV download handler — one file, stacked sections with a shared set of
-# columns (cells not relevant to a section are NA):
+# columns (cells not relevant to a section are NA), so the file is a
+# complete record of the analysis:
 #
+#   Section = "Settings":       app version, date, regression method,
+#                               HWE test and genotype labels (Value column).
+#   Section = "Input":          the entered genotype counts.
 #   Section = "Model":          one row per OR contrast (Genotype has two),
 #                               with Wald/Fisher CI and model AIC.
 #   Section = "LRT":            every likelihood-ratio test on the diagram.
@@ -889,6 +897,14 @@ output$download_results <- downloadHandler(
     dev.off()
     al  <- allelic_tests(ca, co)
     sections <- list(
+      data.frame(Section  = "Settings",
+                 Contrast = c("App version", "Date", "Regression", "HWE test", "Genotype labels"),
+                 Value    = c(app_version, format(Sys.Date()),
+                              if (input$use_firth) "Firth's penalized" else "Standard logistic",
+                              if (input$hwe_method == "exact") "Exact" else "Chi-square",
+                              paste(flev_labels(), collapse = "/"))),
+      data.frame(Section = "Input", Contrast = c("Cases", "Controls"),
+                 WT = c(ca[1], co[1]), Het = c(ca[2], co[2]), Hom = c(ca[3], co[3])),
       cbind(Section = "Model", res$models),
       cbind(Section = "LRT", setNames(res$tests, c("Contrast", "df", "Chisq", "p_value"))),
       cbind(Section = "Allelic tests", setNames(al, c("Contrast", names(al)[-1]))),
@@ -975,7 +991,7 @@ output$result_tables <- renderUI({
       tags$tbody(aic_rows)),
     tags$table(
       class = "table table-sm table-bordered", style = "width:auto;",
-      tags$thead(tags$tr(tags$th("1-df test"), tags$th("\u03c7\u00b2"),
+      tags$thead(tags$tr(tags$th("Trend tests"), tags$th("\u03c7\u00b2"),
                          tags$th("p"), tags$th("Allelic OR (95% CI)"))),
       tags$tbody(al_rows))
   )
