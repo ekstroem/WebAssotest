@@ -1,5 +1,8 @@
 # Web-Assotest
 
+[![check](https://github.com/ekstroem/WebAssotest/actions/workflows/check.yaml/badge.svg)](https://github.com/ekstroem/WebAssot
+  est/actions/workflows/check.yaml)
+
 **Web-Assotest** is a browser-based tool for analysing the association between a genetic variant and a binary outcome (cases vs. controls). Users enter observed genotype counts as a 3×2 table and the tool simultaneously fits four standard genetic models, displaying odds ratios, confidence intervals, and likelihood-ratio test statistics for each, together with the Cochran-Armitage trend test, the allelic test, and a Hardy-Weinberg equilibrium check.
 
 A live version of the tool is available at <http://ekstroem.com:3838/webassotest/>.
@@ -14,7 +17,7 @@ Current version: 0.99
 - Simultaneous fitting of four genetic models: **dominant**, **recessive**, **additive**, and **genotype**
 - Optional **Firth's penalized logistic regression** (via `logistf`) for robust handling of complete separation
 - Visual model comparison diagram with likelihood-ratio test statistics on each path; line width indicates which model transitions are statistically compatible with the data (p ≥ 0.05), explained by a legend on the diagram
-- Model-fit (AIC) comparison table shown alongside the diagram, covering all five models, with the best-fitting (lowest AIC) model highlighted
+- Model-fit (AIC) comparison table shown alongside the diagram, covering all five models, with ΔAIC and all models within 2 AIC units of the best highlighted (lowest in bold)
 - Result panel heading shows which regression method (standard logistic vs. Firth's) produced the current output
 - Customizable genotype labels (defaults to WT/Het/Hom) shown on the diagram, with a warning if two labels collide
 - Analysis options (Firth's regression toggle, HWE test method) grouped in their own panel next to the data-entry table
@@ -96,9 +99,17 @@ WebAssotest/
 ├── paper/            # JOSS manuscript (paper.md, citations.bib, figure.png)
 ├── tests/check.R     # Self-checks of the statistical functions
 ├── CITATION.cff      # Citation metadata (used by GitHub and Zenodo)
+├── CONTRIBUTING.md   # How to report issues, get support, and contribute
+├── NEWS.md           # Changelog
 ├── LICENCE           # MIT licence
 └── README.md         # This file
 ```
+
+---
+
+## Contributing
+
+Bug reports, questions, and contributions are welcome — see [CONTRIBUTING.md](CONTRIBUTING.md). Changes between versions are listed in [NEWS.md](NEWS.md).
 
 ---
 
