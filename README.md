@@ -1,7 +1,6 @@
 # Web-Assotest
 
-[![check](https://github.com/ekstroem/WebAssotest/actions/workflows/check.yaml/badge.svg)](https://github.com/ekstroem/WebAssot
-  est/actions/workflows/check.yaml)
+[![check](https://github.com/ekstroem/WebAssotest/actions/workflows/check.yaml/badge.svg)](https://github.com/ekstroem/WebAssotest/actions/workflows/check.yaml)
 
 **Web-Assotest** is a browser-based tool for analysing the association between a genetic variant and a binary outcome (cases vs. controls). Users enter observed genotype counts as a 3×2 table and the tool simultaneously fits four standard genetic models, displaying odds ratios, confidence intervals, and likelihood-ratio test statistics for each, together with the Cochran-Armitage trend test, the allelic test, and a Hardy-Weinberg equilibrium check.
 
