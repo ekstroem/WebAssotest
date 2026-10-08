@@ -1,4 +1,4 @@
-# Web-Assotest 0.99
+# Web-Assotest 1.00
 
 First open-source release of Web-Assotest.
 

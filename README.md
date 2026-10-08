@@ -6,7 +6,7 @@
 
 A live version of the tool is available at <http://ekstroem.com:3838/webassotest/>.
 
-Current version: 0.99
+Current version: 1.00
 
 ---
 

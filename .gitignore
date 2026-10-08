@@ -1,0 +1,30 @@
+# History files
+.Rhistory
+.Rapp.history
+
+# Session data and workspaces
+.RData
+.RDataTmp
+
+# User-specific package and project settings
+.Ruser
+.Rproj.user/
+
+# R packages documentation and build artifacts
+/*.Rcheck/
+.Rcommand.sh
+
+# Knitr/RMarkdown temporary cache and outputs
+/*_cache/
+/*_files/
+.Rmarkdown_previews/
+
+# Makefile
+Makefile
+
+# Backup files
+*~
+
+
+# Old stuff
+webassotest-old

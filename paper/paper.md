@@ -14,7 +14,7 @@ authors:
 affiliations:
   - name: Department of Public Health, Section of Biostatistics, University of Copenhagen, Denmark
     index: 1
-date: 07 October 2026
+date: 08 October 2026
 bibliography: citations.bib
 output: pdf_document
 ---
@@ -51,7 +51,7 @@ beyond entering the genotype counts into an editable table (see \autoref{fig:exa
 
 `Web-Assotest` started as a stand-alone Windows programme, `Assotest`,
 was later ported to the web, and is now released as open-source
-software with substantially extended functionality. This paper describes version 0.99. The source code is available at
+software with substantially extended functionality. This paper describes version 1.00. The source code is available at
 <https://github.com/ekstroem/WebAssotest>, and users who do not want
 to run the application locally can use it directly in a browser at
 <http://ekstroem.com:3838/webassotest/>.
@@ -109,7 +109,7 @@ program in R, which excludes many clinical and laboratory
 collaborators. Finally, standalone online calculators (e.g., HWE
 calculators) typically provide either an HWE test or a single allelic
 or trend test, not a comparison of genetic models. Two web tools come
-closer. SNPStats [@sole2006snpstats] fits the same genetic models, but
+closer. SNPStats [@sole2006snpstats] fits similar genetic models, but
 requires an uploaded file of individual-level genotype data.
 GeneRiskCalc [@sudershan2025generiskcalc] works from genotype counts
 and reports HWE tests and odds ratios with forest plots under several
@@ -234,10 +234,10 @@ statistical methodology and the model-comparison design of
 `flexdashboard` layout, to speed up the reactive expressions, and to
 refactor parts of the statistical core (formatting and Fisher's-exact
 helpers, the structure of the returned results). It was also used to
-implement the trend and allelic tests, the diagram legend, the PDF export, the complete CSV record,
-numerical fixes (HWE for monomorphic groups, upper-tail p-values), and
-the `tests/check.R` self-checks. All changes were reviewed by the
-author and are checked by `tests/check.R`.
+implement the trend and allelic tests, the diagram legend, the PDF
+export, the complete CSV record, numerical fixes (HWE for monomorphic
+groups), and the `tests/check.R` self-checks. All changes were
+reviewed by the author and are checked by `tests/check.R`.
 
 
 # Acknowledgements

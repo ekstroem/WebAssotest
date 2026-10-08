@@ -4,7 +4,7 @@ date: 'Page loaded: `r format(as.POSIXct(format(Sys.time())), "%b %d, %Y")`'
 output:
   flexdashboard::flex_dashboard:
     navbar:
-      - { title: "v0.99", align: right }
+      - { title: "v1.00", align: right }
     orientation: rows
     vertical_layout: scroll
     social: menu
@@ -157,8 +157,8 @@ library("shinyscreenshot")
 library("logistf")
 
 # Application version, written to the CSV export.
-# Keep in sync with the "v0.99" navbar item in the YAML header.
-app_version <- "0.99"
+# Keep in sync with the "v1.00" navbar item in the YAML header.
+app_version <- "1.00"
 
 # Default genotype count table — rows: Cases/Controls, cols: WT/Het/Hom
 df <- data.frame(
