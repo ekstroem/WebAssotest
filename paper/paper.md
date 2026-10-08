@@ -14,7 +14,7 @@ authors:
 affiliations:
   - name: Department of Public Health, Section of Biostatistics, University of Copenhagen, Denmark
     index: 1
-date: 03 October 2026
+date: 07 October 2026
 bibliography: citations.bib
 output: pdf_document
 ---
@@ -23,21 +23,22 @@ output: pdf_document
 
 `Web-Assotest` is a browser-based tool for analysing various
 associations between a genetic variant and a binary outcome (cases
-vs. controls) from a 3x2 table of observed genotype counts (wild-type
+vs. controls) from a $3\times2$ table of observed genotype counts (wild-type
 / heterozygote / homozygote, by case/control status).
 
 The tool simultaneously fits a hierarchy of five nested
 logistic-regression models --- null, dominant, additive (log-additive),
 recessive, and genotypic --- and presents the resulting odds ratios, 95%
-confidence intervals, likelihood-ratio test statistics, and AIC values
-in a single model-comparison diagram, together with a Hardy-Weinberg
+confidence intervals, and likelihood-ratio test statistics in a
+model-comparison diagram, with AIC values in an accompanying table,
+together with a Hardy-Weinberg
 equilibrium (HWE) check for cases, controls, and the combined sample
-[@wigginton2005note]. Two complementary one-degreeo-of-freedom tests for trend are reported
+[@wigginton2005note]. Two complementary one-degree-of-freedom tests are reported
 alongside the model hierarchy: the Cochran--Armitage trend test
 [@cochran1954some; @armitage1955tests], which is valid without
 assuming HWE, and the allelic test with its allelic odds ratio, which
 doubles the effective sample size but assumes HWE
-[@sasieni1997genotypes].  Users can optionally fit the same model
+[@sasieni1997genotypes]. Users can optionally fit the same model
 hierarchy with Firth's penalized logistic regression [@firth1993bias;
 @ploner2023logistf] to obtain stable estimates when a genotype count
 is zero or the data are otherwise separated.
@@ -45,9 +46,8 @@ is zero or the data are otherwise separated.
 `Web-Assotest` is implemented in R as a single `flexdashboard`/Shiny
 application [@rcoreteam2024; @chang2024shiny;
 @iannone2024flexdashboard], runs entirely in the browser once
-deployed, and requires no local software installation, scripting, or
-statistical training beyond entering the genotype counts into an
-editable table (see \autoref{fig:example}).
+deployed, and requires no local software installation or programming
+beyond entering the genotype counts into an editable table (see \autoref{fig:example}).
 
 `Web-Assotest` started as a stand-alone Windows programme, `Assotest`,
 was later ported to the web, and is now released as open-source
@@ -57,7 +57,7 @@ to run the application locally can use it directly in a browser at
 <http://ekstroem.com:3838/webassotest/>.
 
 
-![The web-interface for Web-Assotest. Genotype counts and labels are entered in the top-left panel (with buttons to flip the allele coding or reset the table), analysis options are chosen in the next panel, and the HWE results are shown next to them. The model-comparison diagram, the AIC table, and the trend and allelic tests are shown below. Results can be saved as a screenshot, a PDF of the diagram, or a CSV file from the top-right panel.\label{fig:example}](figure.png)
+![The web-interface for Web-Assotest. Genotype counts and labels are entered in the top-left panel, analysis options are chosen in the next panel, and the HWE results are shown next to them. The model-comparison diagram, the AIC table, and the trend and allelic tests are shown below. Results can be saved as a screenshot, a PDF of the diagram, or a CSV file from the top-right panel.\label{fig:example}](figure.png)
 
 # Statement of need
 
@@ -81,8 +81,8 @@ in the literature.
 Existing options for this analysis are either large, general-purpose
 genetics toolchains aimed at genome-wide data (e.g., PLINK
 [@purcell2007plink]) that are overkill and require command-line
-fluency for a single 3x2 table, or R packages such as `SNPassoc` that
-require the user to already be working in R. `Web-Assotest` fills the
+fluency for a single $3\times2$ table, or R packages such as `SNPassoc`
+[@gonzalez2007snpassoc] that require the user to already be working in R. `Web-Assotest` fills the
 gap between these: a lightweight, model-comprehensive, point-and-click
 tool for the single-marker case, so that the choice of genetic model
 is made visible and testable rather than assumed.
@@ -92,8 +92,8 @@ genotyping-quality checks and the full set of association tests and
 their extensions are easily available in one place.
 
 The tool has been used as teaching material for case-control study
-design and has been applied by multiple author's in their applied
-genetics research (see Research impact statement below).
+design and has been applied by researchers in several independent
+groups in their applied genetics research (see Research impact statement below).
 
 # State of the field
 
@@ -101,14 +101,24 @@ Users who need to analyse a single genotype-by-outcome table have
 three main kinds of alternatives. Whole-genome toolchains such as
 PLINK are powerful for genome-wide data, but require installation,
 input files in specific formats, and command-line fluency, and
-specification of the different models of genetic transition which is a
+specification of the different genetic inheritance models, which is a
 heavy burden for a single marker. R packages for candidate-gene
-association, such as `SNPassoc` [@gonzalez2007snpassoc], fit the same
+association, such as `SNPassoc`, fit the same
 family of genetic models and are flexible, but require the user to
 program in R, which excludes many clinical and laboratory
 collaborators. Finally, standalone online calculators (e.g., HWE
 calculators) typically provide either an HWE test or a single allelic
-or trend test, not a comparison of genetic models. 
+or trend test, not a comparison of genetic models. Two web tools come
+closer. SNPStats [@sole2006snpstats] fits the same genetic models, but
+requires an uploaded file of individual-level genotype data.
+GeneRiskCalc [@sudershan2025generiskcalc] works from genotype counts
+and reports HWE tests and odds ratios with forest plots under several
+genetic models, but does not test the models against each other.
+`Web-Assotest` needs only the summary genotype counts, so it can also
+re-analyse counts reported in published tables (e.g., for teaching or
+meta-analysis) without any individual-level data leaving the user, and
+it formally compares the nested models through likelihood-ratio tests
+and AIC.
 
 `Web-Assotest` differs from all of the above by combining (a) a
 no-install, browser-based interface, (b) simultaneous fitting and
@@ -177,7 +187,8 @@ re-entering the saved counts and settings.
 **Testing.** The statistical core is checked by `tests/check.R`, which
 compares the application's functions with direct `glm`, `fisher.test`,
 and `prop.trend.test` results, including zero cells, separation,
-monomorphic groups, and extremely small p-values.
+monomorphic groups, and extremely small p-values. The checks run
+automatically on every push via GitHub Actions.
 
 # Research impact statement
 
@@ -185,7 +196,7 @@ monomorphic groups, and extremely small p-values.
 candidate-gene case-control studies spanning more than two decades
 (2004–2025) and a broad range of research groups and populations,
 including Danish, Polish, Iranian, Japanese, Iraqi, and Indian
-cohorts. The applications cover a wide range of phenotypes and publications, some of which are listed below:
+cohorts, and a wide range of phenotypes, for example:
 
 - **Type 2 diabetes and its complications**, including diabetic
   retinopathy and diabetic foot [@hansen2004large;
@@ -209,32 +220,33 @@ cohorts. The applications cover a wide range of phenotypes and publications, som
 - **Reproductive health** (recurrent miscarriage)
   [@sudhir2016association].
 
-This breadth illustrates that the tool meets a recurring need in
-applied genetic epidemiology across clinical specialties: a quick,
-transparent comparison of genetic inheritance models for a single
-marker, performed by researchers who are not necessarily
-statistical programmers.
+This breadth shows a recurring need across clinical specialties for a
+quick, transparent comparison of genetic inheritance models for a
+single marker by researchers who are not statistical programmers.
 
 # AI usage disclosure
 
-AI has been used to correct this manuscript for spelling and Claude
+AI has been used to correct this manuscript for spelling, and Claude
 Code was used to assemble the initial list of papers citing
-Web-Assotest. The list has subsequently been manually curated.  The
-core part of the `webassotest.Rmd` application predates AI tools and
-has not been modified by AI. Claude Code has been used to update and
-improve the flexdashboard layout and has been used to optimize the
-load speed of the reactive expressions in the application.  Claude
-Code was also used to implement the PDF export, numerical fixes (HWE
-for monomorphic groups, upper-tail p-values), and the `tests/check.R`
-self-checks; all changes were reviewed by the author.
+`Web-Assotest`; the list was subsequently curated manually. The
+statistical methodology and the model-comparison design of
+`webassotest.Rmd` predate AI tools. Claude Code was used to update the
+`flexdashboard` layout, to speed up the reactive expressions, and to
+refactor parts of the statistical core (formatting and Fisher's-exact
+helpers, the structure of the returned results). It was also used to
+implement the trend and allelic tests, the diagram legend, the PDF export, the complete CSV record,
+numerical fixes (HWE for monomorphic groups, upper-tail p-values), and
+the `tests/check.R` self-checks. All changes were reviewed by the
+author and are checked by `tests/check.R`.
 
 
 # Acknowledgements
 
 I am grateful to Bendix Carstensen who helped form an initial version
-of the assotest programme. I am also grateful to the users who have provided
+of the `Assotest` programme. I am also grateful to the users who have provided
 encouragement throughout the years to make sure that the application
 was kept available as an online application and continually developed.
+This work received no specific funding.
 
 
 # References

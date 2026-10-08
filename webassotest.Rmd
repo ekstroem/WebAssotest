@@ -337,7 +337,7 @@ ci.mat <- function(alpha = 0.05) {
 # fmt_p(p):   p-value as text; small values in scientific notation
 #             ("1.2e-10") instead of "0.000", floored at "<1e-300".
 # p_lab(p):   "p=0.123" or "p<1e-300" for plot labels.
-# fmt_ci(x):  x = c(estimate, lower, upper) -> "1.23 ( 0.90 ; 1.70 )".
+# fmt_ci(x):  x = c(estimate, lower, upper) -> "1.23 (0.90; 1.70)".
 # --------------------------------------------------------------------
 fmt_p <- function(p) format.pval(p, digits = 3, eps = 1e-300)
 
@@ -348,7 +348,7 @@ p_lab <- function(p) {
 
 fmt_ci <- function(x) {
   f <- formatC(x, format = "f", digits = 2)
-  paste(f[1], "(", f[2], ";", f[3], ")")
+  paste0(f[1], " (", f[2], "; ", f[3], ")")
 }
 
 
@@ -546,23 +546,23 @@ gtm <- function(ca, co,
 
   # Genotype model — top centre
   text(50, 98, "Genotype model", font = 2)
-  text(50, 95, paste("OR(", flev[2], "vs.", flev[1], "):", fmt_ci(OR.g[1, ])))
-  text(50, 92, paste("OR(", flev[3], "vs.", flev[1], "):", fmt_ci(OR.g[2, ])))
+  text(50, 95, paste0("OR(", flev[2], " vs. ", flev[1], "): ", fmt_ci(OR.g[1, ])))
+  text(50, 92, paste0("OR(", flev[3], " vs. ", flev[1], "): ", fmt_ci(OR.g[2, ])))
 
   # Dominant model — left
   text(0, 53, "Dominant", adj = c(0, 0.5), font = 2)
-  text(0, 50, paste("OR(", dlev[2], "vs.", dlev[1], "):"), adj = c(0, 0.5))
+  text(0, 50, paste0("OR(", dlev[2], " vs. ", dlev[1], "):"), adj = c(0, 0.5))
   text(0, 47, fmt_ci(OR.d[1, ]), adj = c(0, 0.5))
 
   # Additive (log-additive) model — centre
   text(50, 53, "Additive", adj = c(0.5, 0.5), font = 2)
-  text(50, 50, paste("OR(", flev[3], "vs.", flev[2], ")=",
-                     "OR(", flev[2], "vs.", flev[1], "):"), adj = c(0.5, 0.5))
+  text(50, 50, paste0("OR(", flev[3], " vs. ", flev[2], ") = ",
+                      "OR(", flev[2], " vs. ", flev[1], "):"), adj = c(0.5, 0.5))
   text(50, 47, fmt_ci(OR.c[1, ]), adj = c(0.5, 0.5))
 
   # Recessive model — right
   text(100, 53, "Recessive", adj = c(1, 0.5), font = 2)
-  text(100, 50, paste("OR(", rlev[3], "vs.", rlev[1], "):"), adj = c(1, 0.5))
+  text(100, 50, paste0("OR(", rlev[3], " vs. ", rlev[1], "):"), adj = c(1, 0.5))
   text(100, 47, fmt_ci(OR.r[1, ]), adj = c(1, 0.5))
 
   # Null model — bottom centre
@@ -675,24 +675,9 @@ Row {data-height=320}
 ### Data input {data-width=1 .input-panel}
 
 ```{r}
-# global holds the table state used to seed the rhandsontable widget.
-# Edits are captured via input$dftbl1 (hot_to_r); global is only replaced
-# by the Flip/Reset buttons. nonce forces a re-render even when the new
-# df is identical to the old one (e.g. Reset after editing the table).
-global <- reactiveValues(df = df, nonce = 0)
-set_table <- function(new_df) {
-  global$df    <- new_df
-  global$nonce <- isolate(global$nonce) + 1
-}
-
+# The table is seeded from the default df; edits arrive via input$dftbl1.
 rHandsontableOutput("dftbl1")
 uiOutput("row_pct")
-
-tags$div(style = "display:flex; gap:6px; margin:6px 0;",
-  actionButton("flip", "Flip allele coding", class = "btn-sm",
-               title = "Swap WT and Hom columns (and their labels)"),
-  actionButton("reset", "Reset", class = "btn-sm",
-               title = "Restore the default table and labels"))
 
 # Row percentages per genotype, so case/control distributions are easy
 # to compare at a glance.
@@ -703,23 +688,6 @@ output$row_pct <- renderUI({
   tags$small(class = "text-muted",
     tags$div("Cases: ",    pct(d$ca)),
     tags$div("Controls: ", pct(d$co)))
-})
-
-# Flip: reverse genotype order so the other allele is the reference.
-# Dominant/recessive swap meaning, so labels are swapped too.
-observeEvent(input$flip, {
-  tbl <- modified_table()[, 3:1]
-  names(tbl) <- c("WT", "Het", "Hom")
-  set_table(tbl)
-  updateTextInput(session, "lbl_wt",  value = input$lbl_hom)
-  updateTextInput(session, "lbl_hom", value = input$lbl_wt)
-})
-
-observeEvent(input$reset, {
-  set_table(df)
-  updateTextInput(session, "lbl_wt",  value = "WT")
-  updateTextInput(session, "lbl_het", value = "Het")
-  updateTextInput(session, "lbl_hom", value = "Hom")
 })
 
 # Optional genotype/allele labels shown on the model-comparison diagram
@@ -765,13 +733,12 @@ output$label_warning <- renderUI({
 # Render the editable 2x3 genotype count table.
 # Row/column editing is disabled — only cell values can be changed.
 # Numeric validation enforces non-negative values and prevents non-numeric input.
-# rowHeaderWidth = 80 ensures "Cases" / "Controls" labels are not clipped.
+# rowHeaderWidth = 95 ensures "Cases" / "Controls" labels are not clipped.
 output$dftbl1 <- renderRHandsontable({
-  global$nonce
-  rhandsontable(global$df, readOnly = FALSE, rowHeaderWidth = 80) %>%
+  rhandsontable(df, readOnly = FALSE, rowHeaderWidth = 95) %>%
     hot_context_menu(allowRowEdit = FALSE, allowColEdit = FALSE) %>%
     hot_validate_numeric(col = c("WT", "Het", "Hom"), min = 0, allowInvalid = FALSE) %>%
-    hot_cols(colWidths = 45)
+    hot_cols(colWidths = 55)
 })
 ```
 
@@ -960,7 +927,9 @@ output$result_plot <- renderPlot({
   model_summary(gtm(ca, co, firth = input$use_firth, flev = flev_labels()))
 }, res = 96)
 
-# Compact AIC comparison table — lower AIC indicates better relative fit —
+# Compact AIC comparison table — lower AIC indicates better relative fit;
+# models within 2 AIC units of the best (delta < 2) have similar support,
+# so all of them are highlighted, with the lowest in bold —
 # shown beside the trend/allelic tests. Built with raw tags (like the HWE
 # table above) rather than renderTable so the lowest-AIC row can be
 # highlighted.
@@ -968,12 +937,15 @@ uiOutput("result_tables")
 output$result_tables <- renderUI({
   req(model_summary())
   df   <- unique(model_summary()$models[, c("Model", "AIC")])
-  best <- which.min(df$AIC)   # ignores NA automatically; first row wins on ties
+  best  <- which.min(df$AIC)   # ignores NA automatically; first row wins on ties
+  delta <- df$AIC - df$AIC[best]
   aic_rows <- lapply(seq_len(nrow(df)), function(i) {
     tags$tr(
-      style = if (i == best) "font-weight:bold; background-color:#c8e6c9;" else NULL,
+      style = paste0(if (isTRUE(delta[i] < 2)) "background-color:#c8e6c9;",
+                     if (i == best) "font-weight:bold;"),
       tags$td(df$Model[i]),
-      tags$td(formatC(df$AIC[i], format = "f", digits = 1))
+      tags$td(formatC(df$AIC[i], format = "f", digits = 1)),
+      tags$td(formatC(delta[i], format = "f", digits = 1))
     )
   })
   d  <- ca_co()
@@ -987,8 +959,10 @@ output$result_tables <- renderUI({
   tags$div(style = "display:flex; flex-wrap:wrap; gap:24px; align-items:flex-start;",
     tags$table(
       class = "table table-sm table-bordered", style = "width:300px;",
-      tags$thead(tags$tr(tags$th("Model"), tags$th("AIC"))),
-      tags$tbody(aic_rows)),
+      tags$thead(tags$tr(tags$th("Model"), tags$th("AIC"), tags$th("\u0394AIC"))),
+      tags$tbody(aic_rows),
+      tags$caption(style = "caption-side:bottom; font-size:smaller;",
+                   "Highlighted: \u0394AIC < 2, similar support")),
     tags$table(
       class = "table table-sm table-bordered", style = "width:auto;",
       tags$thead(tags$tr(tags$th("Trend tests"), tags$th("\u03c7\u00b2"),
@@ -1015,7 +989,7 @@ For an overview and explanation of the models, see the [course slides](https://e
 
 Web-Assotest uses [R](http://www.r-project.org/) for all computations. See the [R Primer book](http://www.rprimer.dk/) for an introduction to statistical analysis in R.
 
-Two 1-df tests are also reported: the **Cochran-Armitage trend test** and the **allelic test** (allele counts in a 2×2 table, with the allelic OR). The allelic test assumes HWE; the trend test does not. **Flip allele coding** swaps which homozygote is the reference, which swaps the meaning of the dominant and recessive models.
+Two 1-df tests are also reported: the **Cochran-Armitage trend test** and the **allelic test** (allele counts in a 2×2 table, with the allelic OR). The allelic test assumes HWE; the trend test does not.
 
 **Note:** cells with zero counts are handled using Fisher's exact test for the affected contrasts. Take care when many cells contain zeros.
 

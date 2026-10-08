@@ -5,12 +5,11 @@ First open-source release of Web-Assotest.
 ## New features
 
 * Fits the null, dominant, additive, recessive, and genotype models and shows the likelihood-ratio tests between them in a model-comparison diagram, with a legend explaining thick and thin lines.
-* AIC table for all five models, with the best-fitting model highlighted.
+* AIC table for all five models with ΔAIC; models within 2 units of the best (similar support) are highlighted.
 * Cochran-Armitage trend test and allelic test (with allelic odds ratio) shown next to the AIC table.
 * Optional Firth's penalized logistic regression (`logistf`) for zero cells and separation.
 * Hardy-Weinberg equilibrium tests (chi-square or exact) for cases, controls, and both combined, with minor allele frequencies.
 * Custom genotype labels, with a warning when two labels are the same.
-* "Flip allele coding" button (swaps the reference homozygote) and "Reset" button.
 * Row percentages shown under the data table.
 * Diagram can be downloaded as a vector PDF.
 * CSV export is a complete record of the analysis: settings (version, date, regression method, HWE test, labels), input counts, all odds ratios with confidence intervals, every likelihood-ratio test, trend and allelic tests, and HWE tests.

@@ -23,7 +23,7 @@ Current version: 0.99
 - Hardy-Weinberg equilibrium test for cases, controls, and both combined — reports minor allele frequency (MAF) and choice of **chi-square** or **exact test** (Wigginton et al., 2005)
 - Automatic fallback to Fisher's exact test for odds ratios when cells contain zeros (standard mode only)
 - Cochran-Armitage trend test and allelic test (with allelic OR) shown beside the AIC table
-- Flip allele coding (swap reference homozygote) and Reset buttons; row percentages under the data table
+- Row percentages under the data table
 - Small p-values shown in scientific notation rather than rounded to 0.000
 - Screenshot export, PDF download of the diagram, and CSV download that records the input counts, settings (method, labels, app version, date) and all results (ORs, every likelihood-ratio test, trend/allelic tests, HWE)
 - Fully browser-based; no software installation required for end users
